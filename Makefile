@@ -32,19 +32,21 @@ clean:
 	@rm -rf $(BUILD_DIR) $(DIST_DIR)
 	$(GOCLEAN)
 
+TEST_TIMEOUT=60s
+
 test: test-unit test-integration
 
 test-unit:
 	@echo "Running unit tests..."
-	$(GOTEST) -v ./rrd/...
+	$(GOTEST) -v -timeout $(TEST_TIMEOUT) ./rrd/...
 
 test-integration:
 	@echo "Running integration tests..."
-	$(GOTEST) -v ./tests/...
+	$(GOTEST) -v -timeout $(TEST_TIMEOUT) ./tests/...
 
 test-all:
 	@echo "Running all tests..."
-	$(GOTEST) -v ./...
+	$(GOTEST) -v -timeout $(TEST_TIMEOUT) ./...
 
 lint:
 	@echo "Linting..."
@@ -78,7 +80,7 @@ docker-logs:
 
 docker-test: docker-up
 	@sleep 15
-	$(GOTEST) -v ./tests/...
+	$(GOTEST) -v -timeout $(TEST_TIMEOUT) ./tests/...
 
 # Development helpers
 fmt:

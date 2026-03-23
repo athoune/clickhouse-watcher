@@ -228,35 +228,45 @@ func (s *State) ExecuteQuery(ctx context.Context, query string) (*clickhouse.Que
 	return client.ExecuteQuery(ctx, query)
 }
 
-func (s *State) QueryHistory(metric string, period string) []rrd.Sample {
+func (s *State) QueryHistory(metric string, period string) ([]rrd.Sample, error) {
+	if s.rrdTotalBytes == nil {
+		return nil, fmt.Errorf("history not available (no data directory)")
+	}
+
 	switch metric {
 	case "total_bytes":
 		switch period {
 		case "day":
-			return s.rrdTotalBytes.QueryDay()
+			return s.rrdTotalBytes.QueryDay(), nil
 		case "week":
-			return s.rrdTotalBytes.QueryWeek()
+			return s.rrdTotalBytes.QueryWeek(), nil
 		case "month":
-			return s.rrdTotalBytes.QueryMonth()
+			return s.rrdTotalBytes.QueryMonth(), nil
 		}
 	case "total_rows":
 		switch period {
 		case "day":
-			return s.rrdTotalRows.QueryDay()
+			return s.rrdTotalRows.QueryDay(), nil
 		case "week":
-			return s.rrdTotalRows.QueryWeek()
+			return s.rrdTotalRows.QueryWeek(), nil
 		case "month":
-			return s.rrdTotalRows.QueryMonth()
+			return s.rrdTotalRows.QueryMonth(), nil
 		}
 	case "uptime":
 		switch period {
 		case "day":
-			return s.rrdUptime.QueryDay()
+			return s.rrdUptime.QueryDay(), nil
 		case "week":
-			return s.rrdUptime.QueryWeek()
+			return s.rrdUptime.QueryWeek(), nil
 		case "month":
-			return s.rrdUptime.QueryMonth()
+			return s.rrdUptime.QueryMonth(), nil
 		}
 	}
-	return nil
+	return nil, fmt.Errorf("unknown metric or period")
+}
+
+func (s *State) GetCHClientForTest() *clickhouse.Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.client
 }

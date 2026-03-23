@@ -218,7 +218,6 @@ func TestScheduler(t *testing.T) {
 	rrd, _ := New("")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	done := make(chan struct{})
 	go func() {
@@ -228,23 +227,28 @@ func TestScheduler(t *testing.T) {
 		})
 	}()
 
-	time.Sleep(3 * time.Minute)
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("Scheduler did not stop")
 	}
 }
 
 func TestAlignedTicker(t *testing.T) {
-	ticker := alignedTicker(2 * time.Minute)
+	start := time.Now()
+	ticker := alignedTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	select {
 	case <-ticker.C:
-	case <-time.After(3 * time.Minute):
+		elapsed := time.Since(start)
+		if elapsed > 200*time.Millisecond {
+			t.Errorf("Ticker fired too late: %v", elapsed)
+		}
+	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Ticker did not fire")
 	}
 }

@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -250,40 +251,35 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResult, 
 	var results [][]string
 
 	for rows.Next() {
-		values := make([]interface{}, len(headers))
+		values := make([]interface{}, len(types))
 		for i, t := range types {
-			switch t.Name() {
-			case "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64":
-				var v int64
-				values[i] = &v
-			case "Float32", "Float64":
-				var v float64
-				values[i] = &v
-			case "String", "FixedString":
-				var v string
-				values[i] = &v
-			case "Date", "DateTime", "DateTime64":
-				var v time.Time
-				values[i] = &v
-			default:
-				var v string
-				values[i] = &v
-			}
+			scanType := t.ScanType()
+			values[i] = reflect.New(scanType).Interface()
 		}
 		if err := rows.Scan(values...); err != nil {
 			continue
 		}
 		row := make([]string, len(headers))
 		for i, v := range values {
-			switch val := v.(type) {
-			case *int64:
-				row[i] = fmt.Sprintf("%d", *val)
-			case *float64:
-				row[i] = fmt.Sprintf("%f", *val)
-			case *string:
-				row[i] = *val
-			case *time.Time:
-				row[i] = val.Format(time.RFC3339)
+			rv := reflect.ValueOf(v)
+			if rv.Kind() == reflect.Ptr {
+				rv = rv.Elem()
+			}
+			switch rv.Kind() {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				row[i] = fmt.Sprintf("%d", rv.Int())
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+				row[i] = fmt.Sprintf("%d", rv.Uint())
+			case reflect.Float32, reflect.Float64:
+				row[i] = fmt.Sprintf("%f", rv.Float())
+			case reflect.String:
+				row[i] = rv.String()
+			case reflect.Struct:
+				if _, ok := v.(*time.Time); ok {
+					row[i] = rv.Interface().(time.Time).Format(time.RFC3339)
+				} else {
+					row[i] = fmt.Sprintf("%v", rv.Interface())
+				}
 			default:
 				row[i] = fmt.Sprintf("%v", v)
 			}

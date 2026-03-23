@@ -56,7 +56,7 @@ func New(socketPath string) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return nil
+	return m.connect()
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -418,14 +418,15 @@ func (m *Model) View() string {
 func (m *Model) connectView() string {
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("\n  ClickHouse Watcher\n\n"))
-	b.WriteString(styles.SubtitleStyle.Render("  Connecting to daemon...\n\n"))
 
 	if m.loading {
-		b.WriteString("  Connecting...\n")
+		b.WriteString("  Connecting to daemon...\n")
 	} else if m.err != nil {
-		b.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  Error: %v\n", m.err)))
+		b.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  Connection failed: %v\n", m.err)))
+		b.WriteString("\n  Press ESC to quit\n")
+	} else {
+		b.WriteString("  Connected!\n")
 	}
-	b.WriteString("  Press ENTER to connect, ESC to quit\n")
 	return b.String()
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -50,6 +51,7 @@ func (s *Server) Start() error {
 	go s.server.Serve(ln)
 	go s.pollLoop()
 
+	log.Printf("Daemon listening on %s", s.socket)
 	return nil
 }
 
@@ -79,7 +81,10 @@ func (s *Server) pollLoop() {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[client] %s %s", r.Method, r.URL.Path)
+
 	path := strings.TrimPrefix(r.URL.Path, "/api")
+	path = strings.TrimPrefix(path, "/")
 
 	switch {
 	case path == "status":
@@ -104,8 +109,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	connected := s.state.IsConnected()
+	log.Printf("[status] connected=%v", connected)
+
 	w.Header().Set("Content-Type", "application/json")
-	if s.state.IsConnected() {
+	if connected {
 		json.NewEncoder(w).Encode(map[string]bool{"connected": true})
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -146,7 +154,13 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, path stri
 	metric := parts[0]
 	period := parts[1]
 
-	samples := s.state.QueryHistory(metric, period)
+	samples, err := s.state.QueryHistory(metric, period)
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(samples)
 }
