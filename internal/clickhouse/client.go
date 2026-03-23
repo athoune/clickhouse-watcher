@@ -252,9 +252,9 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResult, 
 
 	for rows.Next() {
 		values := make([]interface{}, len(types))
-		for i, t := range types {
+		for idx, t := range types {
 			scanType := t.ScanType()
-			values[i] = reflect.New(scanType).Interface()
+			values[idx] = reflect.New(scanType).Interface()
 		}
 		if err := rows.Scan(values...); err != nil {
 			continue

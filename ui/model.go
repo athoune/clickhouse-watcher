@@ -13,41 +13,47 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Model is the main application state for the ClickHouse Watcher TUI.
+// It holds all data needed to render the interface and handles user interactions.
 type Model struct {
-	view          viewState
-	daemon        *client.Client
-	err           error
-	metrics       *clickhouse.SystemMetrics
-	tables        []clickhouse.TableMetric
-	queries       []clickhouse.QueryMetric
-	queryInput    string
-	results       [][]string
-	headers       []string
-	loading       bool
-	width         int
-	height        int
-	selectedIdx   int
-	tableDetail   *clickhouse.TableDetail
-	ttlInput      string
-	actionMsg     string
-	historyData   []rrd.Sample
-	historyPeriod string
-	historyMetric string
+	view          viewState                 // Current view being displayed
+	daemon        *client.Client            // HTTP client connected to the daemon via Unix socket
+	err           error                     // Last error encountered
+	metrics       *clickhouse.SystemMetrics // System metrics from ClickHouse
+	tables        []clickhouse.TableMetric  // List of tables with sizes
+	queries       []clickhouse.QueryMetric  // Currently running queries
+	queryInput    string                    // SQL query text being typed
+	results       [][]string                // Query results as string rows
+	headers       []string                  // Query result column names
+	loading       bool                      // True while connecting to daemon
+	width         int                       // Terminal width
+	height        int                       // Terminal height
+	selectedIdx   int                       // Selected table index in tables view
+	tableDetail   *clickhouse.TableDetail   // Currently viewed table details
+	ttlInput      string                    // TTL expression being typed
+	actionMsg     string                    // Action type for confirmation dialog
+	historyData   []rrd.Sample              // Historical metric samples
+	historyPeriod string                    // History time period: day, week, or month
+	historyMetric string                    // History metric: total_bytes, total_rows, or uptime
 }
 
+// viewState represents the different screens in the application.
 type viewState string
 
+// View constants define all available application screens.
 const (
-	connectView     viewState = "connect"
-	dashboardView   viewState = "dashboard"
-	queryView       viewState = "query"
-	tablesView      viewState = "tables"
-	processesView   viewState = "processes"
-	tableDetailView viewState = "table_detail"
-	confirmView     viewState = "confirm"
-	historyView     viewState = "history"
+	connectView     viewState = "connect"      // Initial connection screen
+	dashboardView   viewState = "dashboard"    // System metrics overview
+	queryView       viewState = "query"        // SQL query executor
+	tablesView      viewState = "tables"       // List of tables
+	processesView   viewState = "processes"    // Running queries
+	tableDetailView viewState = "table_detail" // Single table details
+	confirmView     viewState = "confirm"      // Confirmation dialog
+	historyView     viewState = "history"      // Historical metrics
 )
 
+// New creates a new Model instance for the given daemon socket path.
+// Starts in the connectView state and auto-connects on Init.
 func New(socketPath string) *Model {
 	return &Model{
 		view:   connectView,
@@ -55,10 +61,14 @@ func New(socketPath string) *Model {
 	}
 }
 
+// Init is called once when the application starts.
+// Returns a command to auto-connect to the daemon.
 func (m *Model) Init() tea.Cmd {
 	return m.connect()
 }
 
+// Update handles incoming messages and updates the model state.
+// Main entry point for user input and window events.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -74,6 +84,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// handleKey dispatches keyboard events to the appropriate view handler
+// based on the current view state.
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.view {
 	case connectView:
@@ -96,16 +108,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// handleConnectKey handles keyboard input on the connection screen.
+// Only allows quitting (Ctrl+C or Esc); auto-connect happens in Init.
 func (m *Model) handleConnectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
-	case tea.KeyEnter:
-		return m, m.connect()
 	case tea.KeyCtrlC, tea.KeyEsc:
 		return m, tea.Quit
 	}
 	return m, nil
 }
 
+// handleNavKey handles navigation keys for main views.
+// Supports Tab cycling, arrow keys, Enter selection, and 'r' to refresh.
 func (m *Model) handleNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyTab:
@@ -155,6 +169,8 @@ func (m *Model) handleNavKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleTableDetailKey handles input on the table detail view.
+// Supports typing TTL expressions and triggering truncate or TTL apply.
 func (m *Model) handleTableDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
@@ -179,6 +195,8 @@ func (m *Model) handleTableDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleConfirmKey handles input on confirmation dialogs.
+// Enter confirms, Esc cancels.
 func (m *Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
@@ -194,6 +212,8 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleQueryKey handles input in the SQL query executor.
+// Supports typing queries, backspace, Enter to execute, Esc to exit.
 func (m *Model) handleQueryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
@@ -212,6 +232,8 @@ func (m *Model) handleQueryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// nextView cycles to the next main view in order.
+// Order: Dashboard -> Tables -> Processes -> History -> Query -> Dashboard
 func (m *Model) nextView() {
 	switch m.view {
 	case dashboardView:
@@ -227,6 +249,9 @@ func (m *Model) nextView() {
 	}
 }
 
+// cycleHistoryPeriod changes the history time period.
+// dir should be 1 for next period, -1 for previous.
+// Cycles through: day -> week -> month -> day
 func (m *Model) cycleHistoryPeriod(dir int) {
 	periods := []string{"day", "week", "month"}
 	for i, p := range periods {
@@ -237,11 +262,13 @@ func (m *Model) cycleHistoryPeriod(dir int) {
 	}
 }
 
+// loadHistory fetches historical metrics data from the daemon.
 func (m *Model) loadHistory() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = ctx
+
+		_, _ = ctx, cancel
 
 		samples, err := m.daemon.GetHistory(m.historyMetric, m.historyPeriod)
 		if err != nil {
@@ -254,6 +281,8 @@ func (m *Model) loadHistory() tea.Cmd {
 	}
 }
 
+// connect attempts to connect to the daemon and fetch initial metrics.
+// If successful, transitions to dashboardView. Runs asynchronously.
 func (m *Model) connect() tea.Cmd {
 	return func() tea.Msg {
 		m.loading = true
@@ -281,6 +310,7 @@ func (m *Model) connect() tea.Cmd {
 	}
 }
 
+// refresh fetches fresh data for the current view.
 func (m *Model) refresh() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -308,6 +338,8 @@ func (m *Model) refresh() tea.Cmd {
 	}
 }
 
+// showTableDetail populates tableDetail with the selected table's info
+// and switches to the table detail view.
 func (m *Model) showTableDetail() tea.Cmd {
 	return func() tea.Msg {
 		if len(m.tables) == 0 || m.selectedIdx >= len(m.tables) {
@@ -325,6 +357,7 @@ func (m *Model) showTableDetail() tea.Cmd {
 	}
 }
 
+// truncateTable switches to the confirmation view for table truncation.
 func (m *Model) truncateTable() tea.Cmd {
 	return func() tea.Msg {
 		m.view = confirmView
@@ -333,6 +366,7 @@ func (m *Model) truncateTable() tea.Cmd {
 	}
 }
 
+// executeTruncate performs the actual table truncation via the daemon.
 func (m *Model) executeTruncate() tea.Cmd {
 	return func() tea.Msg {
 		if m.tableDetail == nil {
@@ -353,6 +387,7 @@ func (m *Model) executeTruncate() tea.Cmd {
 	}
 }
 
+// modifyTTL applies the TTL expression to the current table via the daemon.
 func (m *Model) modifyTTL() tea.Cmd {
 	return func() tea.Msg {
 		if m.tableDetail == nil {
@@ -371,6 +406,7 @@ func (m *Model) modifyTTL() tea.Cmd {
 	}
 }
 
+// executeQuery runs the typed SQL query via the daemon and stores results.
 func (m *Model) executeQuery() tea.Cmd {
 	return func() tea.Msg {
 		if m.queryInput == "" {
@@ -392,6 +428,7 @@ func (m *Model) executeQuery() tea.Cmd {
 	}
 }
 
+// View returns the rendered string for the current view.
 func (m *Model) View() string {
 	switch m.view {
 	case connectView:
@@ -415,12 +452,24 @@ func (m *Model) View() string {
 	}
 }
 
+// asciiLogo is the ClickHouse Watcher ASCII art banner displayed on the connect screen.
+const asciiLogo = `
+   ██████                                 ██████                     
+  ██      ██                           ██      ██                    
+  ██      ██   ██████   ██████        ██          ██   ██████  ██████ 
+  ██      ██  ██    ██ ██    ██       ██   ██████ ██  ██    ██ ██   ██
+  ██      ██  ██    ██ ██    ██       ██  ██   ██ ██  ██    ██ ██   ██
+   ██████   ██  ██████   ██████         ████ ████ ██   ██████  ██████
+`
+
+// connectView renders the initial connection screen with ASCII logo and status.
 func (m *Model) connectView() string {
 	var b strings.Builder
-	b.WriteString(styles.TitleStyle.Render("\n  ClickHouse Watcher\n\n"))
+	b.WriteString(styles.AsciiStyle.Render(asciiLogo))
+	b.WriteString("\n")
 
 	if m.loading {
-		b.WriteString("  Connecting to daemon...\n")
+		b.WriteString("  Connecting " + styles.FooterStyle.Render(m.daemon.SocketPath()) + "\n")
 	} else if m.err != nil {
 		b.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  Connection failed: %v\n", m.err)))
 		b.WriteString("\n  Press ESC to quit\n")
@@ -430,6 +479,7 @@ func (m *Model) connectView() string {
 	return b.String()
 }
 
+// dashboardView renders the system metrics overview.
 func (m *Model) dashboardView() string {
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("\n  System Metrics\n\n"))
@@ -445,6 +495,7 @@ func (m *Model) dashboardView() string {
 	return b.String()
 }
 
+// tablesView renders the list of tables with selection.
 func (m *Model) tablesView() string {
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("\n  Tables\n\n"))
@@ -478,6 +529,7 @@ func (m *Model) tablesView() string {
 	return b.String()
 }
 
+// tableDetailView renders details for a single table with TTL management.
 func (m *Model) tableDetailView() string {
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("\n  Table Details\n\n"))
@@ -503,6 +555,7 @@ func (m *Model) tableDetailView() string {
 	return b.String()
 }
 
+// confirmView renders the confirmation dialog for destructive actions.
 func (m *Model) confirmView() string {
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("\n  Confirm Action\n\n"))
@@ -518,6 +571,7 @@ func (m *Model) confirmView() string {
 	return b.String()
 }
 
+// historyView renders the historical metrics data with period selection.
 func (m *Model) historyView() string {
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("\n  Metrics History\n\n"))
@@ -554,6 +608,7 @@ func (m *Model) historyView() string {
 	return b.String()
 }
 
+// processesView renders the list of currently running queries.
 func (m *Model) processesView() string {
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("\n  Running Queries\n\n"))
@@ -572,6 +627,7 @@ func (m *Model) processesView() string {
 	return b.String()
 }
 
+// queryView renders the SQL query executor with results display.
 func (m *Model) queryView() string {
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("\n  Query Executor\n\n"))
@@ -601,6 +657,7 @@ func (m *Model) queryView() string {
 	return b.String()
 }
 
+// formatBytes converts a byte count to a human-readable string (KB, MB, GB, etc.).
 func formatBytes(bytes uint64) string {
 	const unit = 1024
 	if bytes < unit {
@@ -614,6 +671,7 @@ func formatBytes(bytes uint64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+// truncate shortens a string to maxLen characters, appending ".." if truncated.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s

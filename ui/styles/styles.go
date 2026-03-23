@@ -39,4 +39,11 @@ var (
 
 	StatusDisconnected = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FF5555"))
+
+	AsciiStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#00D9FF")).
+			Bold(true)
+
+	FooterStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#666666"))
 )

@@ -29,6 +29,10 @@ func NewClient(socketPath string) *Client {
 	}
 }
 
+func (c *Client) SocketPath() string {
+	return c.socketPath
+}
+
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
 	u := &url.URL{
 		Scheme: "http",
