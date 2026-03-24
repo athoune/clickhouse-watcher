@@ -13,6 +13,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// tickMsg is sent to trigger a re-render.
+type tickMsg struct{}
+
 // Model is the main application state for the ClickHouse Watcher TUI.
 // It holds all data needed to render the interface and handles user interactions.
 type Model struct {
@@ -78,6 +81,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tickMsg:
+		return m, nil
 
 	default:
 		return m, nil
@@ -281,7 +287,7 @@ func (m *Model) loadHistory() tea.Cmd {
 	}
 }
 
-// connect attempts to connect to the daemon and fetch initial metrics.
+// connect attempts to connect to the daemon and fetch all initial data.
 // If successful, transitions to dashboardView. Runs asynchronously.
 func (m *Model) connect() tea.Cmd {
 	return func() tea.Msg {
@@ -302,11 +308,22 @@ func (m *Model) connect() tea.Cmd {
 			m.loading = false
 			return nil
 		}
-
 		m.metrics = metrics
+
+		tables, err := m.daemon.GetTables(ctx)
+		if err == nil {
+			m.tables = tables
+		}
+
+		queries, err := m.daemon.GetQueries(ctx)
+		if err == nil {
+			m.queries = queries
+		}
+
 		m.view = dashboardView
 		m.loading = false
-		return nil
+		time.Sleep(500 * time.Millisecond)
+		return tickMsg{}
 	}
 }
 
