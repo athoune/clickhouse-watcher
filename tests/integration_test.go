@@ -20,7 +20,7 @@ func TestConnection(t *testing.T) {
 
 	client, err := clickhouse.NewClient(conn)
 	if err != nil {
-		t.Skipf("Skipping test: cannot connect to ClickHouse: %v", err)
+		t.Skipf("Skipping test: cannot connect to clickHouse://%s:%s@%s:%v : %v", conn.Username, conn.Password, conn.Host, conn.Port, err)
 	}
 	defer client.Close()
 
