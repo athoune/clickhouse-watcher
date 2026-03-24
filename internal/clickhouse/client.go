@@ -117,7 +117,12 @@ func (c *Client) GetSystemMetrics(ctx context.Context) (*SystemMetrics, error) {
 
 	var totalRows uint64
 	var totalBytes uint64
-	query = "SELECT sum(rows), sum(data_compressed_bytes) FROM system.tables"
+	query = `
+SELECT
+    sum(total_rows) AS rows,
+    sum(total_bytes) AS bytes
+FROM system.tables
+		`
 	row = c.conn.QueryRow(ctx, query)
 	_ = row.Scan(&totalRows, &totalBytes)
 
