@@ -38,7 +38,7 @@ test: test-unit test-integration
 
 test-unit:
 	@echo "Running unit tests..."
-	$(GOTEST) -v -timeout $(TEST_TIMEOUT) ./rrd/...
+	$(GOTEST) -v -timeout $(TEST_TIMEOUT) ./rrd/... ./daemon/... ./client/... ./ui/...
 
 test-integration:
 	@echo "Running integration tests..."
