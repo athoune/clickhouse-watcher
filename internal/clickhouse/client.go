@@ -52,6 +52,13 @@ type TableDetail struct {
 	TTL        string
 }
 
+type TruncatableTable struct {
+	Database    string
+	Table       string
+	Rows        uint64
+	Size        uint64
+	Truncatable bool
+}
 type QueryResult struct {
 	Headers []string
 	Rows    [][]string
@@ -166,7 +173,7 @@ func (c *Client) GetTableMetrics(ctx context.Context, limit int) ([]TableMetric,
 
 func (c *Client) GetTableDetails(ctx context.Context, database, table string) (*TableDetail, error) {
 	query := `
-		SELECT 
+		SELECT
 			database,
 			name,
 			engine,
@@ -183,8 +190,8 @@ func (c *Client) GetTableDetails(ctx context.Context, database, table string) (*
 	}
 
 	ttlQuery := `
-		SELECT expression 
-		FROM system.ttl_recalculations 
+		SELECT expression
+		FROM system.ttl_recalculations
 		WHERE database = ? AND table_name = ?
 		LIMIT 1
 	`
@@ -211,7 +218,7 @@ func (c *Client) ModifyTTL(ctx context.Context, database, table, newTTL string) 
 
 func (c *Client) GetRunningQueries(ctx context.Context) ([]QueryMetric, error) {
 	query := `
-		SELECT 
+		SELECT
 			query,
 			read_rows,
 			read_bytes,
@@ -237,6 +244,51 @@ func (c *Client) GetRunningQueries(ctx context.Context) ([]QueryMetric, error) {
 	}
 
 	return metrics, nil
+}
+
+func (c *Client) GetTruncatableTables(ctx context.Context) ([]TruncatableTable, error) {
+	query := `
+SELECT
+    database,
+    "table",
+    size,
+    rows,
+    like(comment, '%It is safe to truncate or drop this table at any time.') AS truncatable
+FROM system.tables AS t
+INNER JOIN
+(
+    SELECT
+        "table",
+        database,
+        formatReadableSize(sum(bytes)) AS size,
+        sum(bytes) AS bytes_raw,
+        sum(rows) AS rows
+    FROM system.parts
+    WHERE active
+    GROUP BY
+        database,
+        "table"
+    ORDER BY bytes_raw DESC
+    LIMIT 50
+) AS p ON (t."table" = p."table") AND (t.database = p.database)
+ORDER BY p.bytes_raw DESC
+	`
+	rows, err := c.conn.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query processes: %w", err)
+	}
+	defer rows.Close()
+
+	var tables []TruncatableTable
+	for rows.Next() {
+		var line TruncatableTable
+		err = rows.Scan(&line.Table, &line.Database, &line.Size, &line.Rows, &line.Truncatable)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan query response: %w", err)
+		}
+		tables = append(tables, line)
+	}
+	return tables, nil
 }
 
 func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResult, error) {
