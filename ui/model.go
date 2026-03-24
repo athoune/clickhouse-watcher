@@ -15,7 +15,11 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	humanize "github.com/dustin/go-humanize"
 )
+
+// processRefreshInterval controls how often the Processes tab polls for new data.
+const processRefreshInterval = 10 * time.Second
 
 // tab indices
 const (
@@ -31,7 +35,9 @@ var tabNames = []string{"Dashboard", "Tables", "Fat Tables", "Processes", "Histo
 var historyMetrics = []string{"total_bytes", "total_rows", "uptime"}
 var historyPeriods = []string{"day", "week", "month"}
 
-// --- messages ----------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
 
 type connectedMsg struct{}
 type errMsg struct{ err error }
@@ -42,74 +48,138 @@ type queriesMsg struct{ queries []clickhouse.QueryMetric }
 type historyMsg struct{ samples []rrd.Sample }
 type tableDetailMsg struct{ detail *clickhouse.TableDetail }
 type actionDoneMsg struct{ info string }
+type processTickMsg struct{}
 
-// --- styles ------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Palette
+// ---------------------------------------------------------------------------
 
 var (
-	colorBg      = lipgloss.Color("#1E1E1E")
-	colorBlue    = lipgloss.Color("#0078D4")
-	colorGreen   = lipgloss.Color("#00FF88")
-	colorRed     = lipgloss.Color("#FF5555")
-	colorGray    = lipgloss.Color("#888888")
-	colorDimGray = lipgloss.Color("#666666")
-	colorCyan    = lipgloss.Color("#00D9FF")
-	colorWhite   = lipgloss.Color("#CCCCCC")
+	// Base colours
+	clrBg        = lipgloss.Color("#0D1117") // near-black background
+	clrSurface   = lipgloss.Color("#161B22") // slightly lighter surface
+	clrBorder    = lipgloss.Color("#30363D") // GitHub-dark border tone
+	clrBlue      = lipgloss.Color("#58A6FF") // accent blue
+	clrGreen     = lipgloss.Color("#3FB950") // success / value green
+	clrYellow    = lipgloss.Color("#D29922") // warning / muted accent
+	clrRed       = lipgloss.Color("#F85149") // error / destructive
+	clrCyan      = lipgloss.Color("#79C0FF") // highlight cyan
+	clrText      = lipgloss.Color("#C9D1D9") // primary text
+	clrMuted     = lipgloss.Color("#8B949E") // secondary / muted text
+	clrDim       = lipgloss.Color("#484F58") // very dim (separators)
+	clrWhite     = lipgloss.Color("#FFFFFF")
+	clrTabActive = lipgloss.Color("#1F6FEB") // active tab bg
+
+	// Chrome
+	chromeBarStyle = lipgloss.NewStyle().
+			Background(clrSurface).
+			Foreground(clrMuted)
 
 	activeTabStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(colorBlue).
-			Padding(0, 1)
+			Background(clrTabActive).
+			Foreground(clrWhite).
+			Bold(true).
+			Padding(0, 2)
 
 	inactiveTabStyle = lipgloss.NewStyle().
-				Foreground(colorGray).
-				Padding(0, 1)
+				Background(clrSurface).
+				Foreground(clrMuted).
+				Padding(0, 2)
 
 	tabSepStyle = lipgloss.NewStyle().
-			Foreground(colorDimGray)
+			Background(clrSurface).
+			Foreground(clrDim)
 
-	sectionStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
+	helpBarStyle = lipgloss.NewStyle().
+			Background(clrSurface).
+			Foreground(clrMuted)
+
+	helpKeyStyle = lipgloss.NewStyle().
+			Background(clrSurface).
+			Foreground(clrCyan).
 			Bold(true)
 
-	valueStyle = lipgloss.NewStyle().
-			Foreground(colorGreen)
+	statusStyle = lipgloss.NewStyle().
+			Background(clrSurface).
+			Foreground(clrMuted)
+
+	// Content
+	sectionStyle = lipgloss.NewStyle().
+			Foreground(clrBlue).
+			Bold(true).
+			BorderStyle(lipgloss.ThickBorder()).
+			BorderBottom(true).
+			BorderForeground(clrBorder)
+
+	cardStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(clrBorder).
+			Padding(0, 1)
 
 	labelStyle = lipgloss.NewStyle().
-			Foreground(colorWhite)
+			Foreground(clrMuted)
 
-	errorStyle = lipgloss.NewStyle().
-			Foreground(colorRed)
-
-	mutedStyle = lipgloss.NewStyle().
-			Foreground(colorGray)
-
-	helpStyle = lipgloss.NewStyle().
-			Foreground(colorDimGray).
-			Background(colorBg)
-
-	logoStyle = lipgloss.NewStyle().
-			Foreground(colorCyan).
+	valueStyle = lipgloss.NewStyle().
+			Foreground(clrGreen).
 			Bold(true)
 
-	tableStyle = table.DefaultStyles()
+	dimValueStyle = lipgloss.NewStyle().
+			Foreground(clrText)
+
+	errorStyle = lipgloss.NewStyle().
+			Foreground(clrRed).
+			Bold(true)
+
+	warnStyle = lipgloss.NewStyle().
+			Foreground(clrYellow)
+
+	mutedStyle = lipgloss.NewStyle().
+			Foreground(clrMuted)
+
+	logoStyle = lipgloss.NewStyle().
+			Foreground(clrCyan).
+			Bold(true)
+
+	// Process card
+	queryCardStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(clrBorder).
+			Padding(0, 1).
+			MarginBottom(1)
+
+	queryTextStyle = lipgloss.NewStyle().
+			Foreground(clrText)
+
+	queryNumStyle = lipgloss.NewStyle().
+			Foreground(clrCyan).
+			Bold(true)
+
+	// Table styles
+	tblStyle = func() table.Styles {
+		s := table.DefaultStyles()
+		s.Header = s.Header.
+			Bold(true).
+			Foreground(clrCyan).
+			Background(clrSurface).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderBottom(true).
+			BorderForeground(clrBorder)
+		s.Selected = s.Selected.
+			Foreground(clrWhite).
+			Background(clrTabActive).
+			Bold(true)
+		s.Cell = s.Cell.
+			Foreground(clrText)
+		return s
+	}()
+
+	// TTL input
+	ttlPromptStyle = lipgloss.NewStyle().Foreground(clrYellow)
 )
 
-func init() {
-	tableStyle.Header = tableStyle.Header.
-		Bold(true).
-		Foreground(colorCyan).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		BorderForeground(colorGray)
-	tableStyle.Selected = tableStyle.Selected.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(colorBlue).
-		Bold(false)
-	tableStyle.Cell = tableStyle.Cell.
-		Foreground(colorWhite)
-}
-
-// --- Model -------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
 
 type Model struct {
 	tab    int
@@ -137,34 +207,36 @@ type Model struct {
 	histViewport viewport.Model
 	ttlInput     textinput.Model
 
-	// dashboard state
+	// dashboard detail state
 	tableDetail *clickhouse.TableDetail
 	actionMsg   string
 
 	// history navigation
 	histMetricIdx int
 	histPeriodIdx int
+
+	// processes auto-refresh
+	procRefreshAt time.Time
 }
 
 func New(socketPath string) *Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(colorCyan)
+	sp.Style = lipgloss.NewStyle().Foreground(clrCyan)
 
 	ti := textinput.New()
 	ti.Placeholder = "e.g. created_at + INTERVAL 30 DAY"
 	ti.CharLimit = 200
+	ti.PromptStyle = ttlPromptStyle
+	ti.TextStyle = lipgloss.NewStyle().Foreground(clrText)
 
-	m := &Model{
-		tab:           tabDashboard,
-		daemon:        client.NewClient(socketPath),
-		spinner:       sp,
-		loading:       true,
-		histMetricIdx: 0,
-		histPeriodIdx: 0,
-		ttlInput:      ti,
+	return &Model{
+		tab:      tabDashboard,
+		daemon:   client.NewClient(socketPath),
+		spinner:  sp,
+		loading:  true,
+		ttlInput: ti,
 	}
-	return m
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -174,7 +246,9 @@ func (m *Model) Init() tea.Cmd {
 	)
 }
 
-// --- Update ------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -201,6 +275,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cmdFetchTables(),
 			m.cmdFetchTruncatables(),
 			m.cmdFetchQueries(),
+			m.cmdProcessTick(),
 		)
 
 	case errMsg:
@@ -225,6 +300,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case queriesMsg:
 		m.queries = msg.queries
+		m.procRefreshAt = time.Now()
 		m.refreshProcesses()
 		return m, nil
 
@@ -245,11 +321,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshDashboard()
 		return m, nil
 
+	case processTickMsg:
+		return m, tea.Batch(
+			m.cmdFetchQueries(),
+			m.cmdProcessTick(),
+		)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 
-	// delegate to focused sub-component
 	return m.updateFocused(msg)
 }
 
@@ -280,11 +361,12 @@ func (m *Model) updateFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// TTL input absorbs all keys when focused
+	// TTL input consumes all keys while focused.
 	if m.tab == tabDashboard && m.tableDetail != nil && m.ttlInput.Focused() {
 		switch msg.Type {
 		case tea.KeyEsc:
 			m.ttlInput.Blur()
+			m.refreshDashboard()
 			return m, nil
 		case tea.KeyEnter:
 			return m, m.cmdModifyTTL()
@@ -318,9 +400,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tabFatTables:
 			return m, m.cmdFatTableSelect()
 		}
-	}
-
-	switch msg.Type {
 	case tea.KeyLeft:
 		if m.tab == tabHistory {
 			m.histPeriodIdx = (m.histPeriodIdx - 1 + len(historyPeriods)) % len(historyPeriods)
@@ -361,16 +440,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.updateFocused(msg)
 }
 
-// --- commands ----------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
 
 func (m *Model) cmdConnect() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
-		// keep the 500ms animation the user wants
 		time.Sleep(500 * time.Millisecond)
-
 		ok, err := m.daemon.IsConnected(ctx)
 		if err != nil || !ok {
 			return errMsg{fmt.Errorf("daemon not available")}
@@ -425,6 +503,13 @@ func (m *Model) cmdFetchQueries() tea.Cmd {
 		}
 		return queriesMsg{queries}
 	}
+}
+
+// cmdProcessTick schedules the next automatic process-list refresh.
+func (m *Model) cmdProcessTick() tea.Cmd {
+	return tea.Tick(processRefreshInterval, func(time.Time) tea.Msg {
+		return processTickMsg{}
+	})
 }
 
 func (m *Model) cmdFetchHistory() tea.Cmd {
@@ -487,8 +572,7 @@ func (m *Model) cmdTruncate() tea.Cmd {
 	if m.tableDetail == nil {
 		return nil
 	}
-	db := m.tableDetail.Database
-	tbl := m.tableDetail.Name
+	db, tbl := m.tableDetail.Database, m.tableDetail.Name
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -505,41 +589,42 @@ func (m *Model) cmdModifyTTL() tea.Cmd {
 	if m.tableDetail == nil {
 		return nil
 	}
-	db := m.tableDetail.Database
-	tbl := m.tableDetail.Name
-	ttl := m.ttlInput.Value()
+	db, tbl, ttl := m.tableDetail.Database, m.tableDetail.Name, m.ttlInput.Value()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := m.daemon.ModifyTTL(ctx, db, tbl, ttl); err != nil {
 			return errMsg{fmt.Errorf("TTL modify failed: %w", err)}
 		}
-		return actionDoneMsg{fmt.Sprintf("TTL set to: %s", ttl)}
+		return actionDoneMsg{fmt.Sprintf("TTL set: %s", ttl)}
 	}
 }
 
-// --- pane builders -----------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Pane layout
+// ---------------------------------------------------------------------------
 
 func (m *Model) resizePanes() {
-	contentH := m.contentHeight()
-	contentW := m.width
+	h := m.contentHeight()
+	w := m.width
 
-	m.dashViewport.Width = contentW
-	m.dashViewport.Height = contentH
+	m.dashViewport.Width = w
+	m.dashViewport.Height = h
 
-	m.procViewport.Width = contentW
-	m.procViewport.Height = contentH
+	m.procViewport.Width = w
+	m.procViewport.Height = h
 
-	m.histViewport.Width = contentW
-	m.histViewport.Height = contentH
+	m.histViewport.Width = w
+	m.histViewport.Height = h
 
 	m.rebuildTablesTable()
 	m.rebuildFatTable()
 }
 
+// contentHeight returns the usable lines between the tab bar and the help bar.
 func (m *Model) contentHeight() int {
-	// subtract tab bar (1) + separator (1) + help bar (1)
-	h := m.height - 3
+	// 1 tab bar + 1 help bar
+	h := m.height - 2
 	if h < 1 {
 		return 1
 	}
@@ -559,32 +644,31 @@ func (m *Model) rebuildTablesTable() {
 	dbW := w / 5
 	sizeW := 12
 	dateW := 12
-	cols := []table.Column{
-		{Title: "Table", Width: nameW},
-		{Title: "Database", Width: dbW},
-		{Title: "Size", Width: sizeW},
-		{Title: "Min Date", Width: dateW},
-		{Title: "Max Date", Width: dateW},
-	}
-	rows := make([]table.Row, 0, len(m.tables))
-	for _, t := range m.tables {
-		rows = append(rows, table.Row{t.Name, t.Database, t.Size, t.MinDate, t.MaxDate})
-	}
-	cur := 0
-	if m.tablesTable.Cursor() < len(rows) {
-		cur = m.tablesTable.Cursor()
-	}
 	h := m.contentHeight() - 2
 	if h < 1 {
 		h = 1
 	}
+	cur := m.tablesTable.Cursor()
+	rows := make([]table.Row, 0, len(m.tables))
+	for _, t := range m.tables {
+		rows = append(rows, table.Row{t.Name, t.Database, t.Size, t.MinDate, t.MaxDate})
+	}
+	if cur >= len(rows) {
+		cur = 0
+	}
 	m.tablesTable = table.New(
-		table.WithColumns(cols),
+		table.WithColumns([]table.Column{
+			{Title: "Table", Width: nameW},
+			{Title: "Database", Width: dbW},
+			{Title: "Size", Width: sizeW},
+			{Title: "Min Date", Width: dateW},
+			{Title: "Max Date", Width: dateW},
+		}),
 		table.WithRows(rows),
 		table.WithFocused(true),
 		table.WithHeight(h),
 	)
-	m.tablesTable.SetStyles(tableStyle)
+	m.tablesTable.SetStyles(tblStyle)
 	m.tablesTable.SetCursor(cur)
 }
 
@@ -593,38 +677,40 @@ func (m *Model) rebuildFatTable() {
 	dbW := w / 5
 	nameW := w / 4
 	sizeW := 12
-	rowsW := 10
+	rowsW := 12
 	truncW := 11
-	cols := []table.Column{
-		{Title: "Database", Width: dbW},
-		{Title: "Table", Width: nameW},
-		{Title: "Size", Width: sizeW},
-		{Title: "Rows", Width: rowsW},
-		{Title: "Truncatable", Width: truncW},
+	h := m.contentHeight() - 2
+	if h < 1 {
+		h = 1
 	}
+	cur := m.fatTable.Cursor()
 	rows := make([]table.Row, 0, len(m.truncatables))
 	for _, t := range m.truncatables {
 		flag := "no"
 		if t.Truncatable {
 			flag = "yes"
 		}
-		rows = append(rows, table.Row{t.Database, t.Table, t.Size, fmt.Sprintf("%d", t.Rows), flag})
+		rows = append(rows, table.Row{
+			t.Database, t.Table, t.Size,
+			humanize.Comma(int64(t.Rows)), flag,
+		})
 	}
-	cur := 0
-	if m.fatTable.Cursor() < len(rows) {
-		cur = m.fatTable.Cursor()
-	}
-	h := m.contentHeight() - 2
-	if h < 1 {
-		h = 1
+	if cur >= len(rows) {
+		cur = 0
 	}
 	m.fatTable = table.New(
-		table.WithColumns(cols),
+		table.WithColumns([]table.Column{
+			{Title: "Database", Width: dbW},
+			{Title: "Table", Width: nameW},
+			{Title: "Size", Width: sizeW},
+			{Title: "Rows", Width: rowsW},
+			{Title: "Truncatable", Width: truncW},
+		}),
 		table.WithRows(rows),
 		table.WithFocused(true),
 		table.WithHeight(h),
 	)
-	m.fatTable.SetStyles(tableStyle)
+	m.fatTable.SetStyles(tblStyle)
 	m.fatTable.SetCursor(cur)
 }
 
@@ -640,19 +726,9 @@ func (m *Model) refreshHistory() {
 	m.histViewport.SetContent(m.renderHistoryContent())
 }
 
-// --- View --------------------------------------------------------------------
-
-func (m *Model) View() string {
-	if m.loading || m.connectErr != "" {
-		return m.connectView()
-	}
-
-	return strings.Join([]string{
-		m.renderTabBar(),
-		m.renderContent(),
-		m.renderHelp(),
-	}, "\n")
-}
+// ---------------------------------------------------------------------------
+// View
+// ---------------------------------------------------------------------------
 
 const asciiLogo = `
     __  __ __      __    __   ____  ______   __  __ __    ___  ____
@@ -664,6 +740,15 @@ const asciiLogo = `
  \____||__|__|      \_/\_/  |__|__|  |__| \____||__|__||_____||__|\_|
 `
 
+func (m *Model) View() string {
+	if m.loading || m.connectErr != "" {
+		return m.connectView()
+	}
+	return m.renderTabBar() + "\n" +
+		m.renderContent() + "\n" +
+		m.renderHelpBar()
+}
+
 func (m *Model) connectView() string {
 	logo := logoStyle.Align(lipgloss.Center).Width(m.width).Render(asciiLogo)
 	var status string
@@ -671,26 +756,86 @@ func (m *Model) connectView() string {
 		status = errorStyle.Render("  Connection failed: "+m.connectErr) +
 			"\n\n" + mutedStyle.Render("  Press ESC to quit")
 	} else {
-		status = labelStyle.Render("  Connecting to ") +
-			valueStyle.Render(m.daemon.SocketPath()) +
+		status = mutedStyle.Render("  Connecting to ") +
+			dimValueStyle.Render(m.daemon.SocketPath()) +
 			"  " + m.spinner.View()
 	}
 	return logo + "\n\n" + status + "\n"
 }
 
 func (m *Model) renderTabBar() string {
-	parts := make([]string, 0, len(tabNames)*2)
+	var tabs strings.Builder
 	for i, name := range tabNames {
 		if i > 0 {
-			parts = append(parts, tabSepStyle.Render(" │ "))
+			tabs.WriteString(tabSepStyle.Render("│"))
 		}
 		if i == m.tab {
-			parts = append(parts, activeTabStyle.Render(name))
+			tabs.WriteString(activeTabStyle.Render(name))
 		} else {
-			parts = append(parts, inactiveTabStyle.Render(name))
+			tabs.WriteString(inactiveTabStyle.Render(name))
 		}
 	}
-	return strings.Join(parts, "")
+	// pad the remainder of the bar with the surface colour
+	return chromeBarStyle.Width(m.width).Render(tabs.String())
+}
+
+func (m *Model) renderHelpBar() string {
+	var keys []string
+	switch m.tab {
+	case tabDashboard:
+		if m.tableDetail != nil {
+			if m.ttlInput.Focused() {
+				keys = []string{"Enter:apply", "Esc:cancel"}
+			} else {
+				keys = []string{"t:truncate", "l:TTL", "Esc:back", "r:refresh"}
+			}
+		} else {
+			keys = []string{"r:refresh", "Tab:next"}
+		}
+	case tabTables:
+		keys = []string{"↑↓:select", "Enter:detail", "r:refresh", "Tab:next"}
+	case tabFatTables:
+		keys = []string{"↑↓:select", "Enter:detail", "r:refresh", "Tab:next"}
+	case tabProcesses:
+		keys = []string{"↑↓:scroll", "r:refresh", "Tab:next"}
+	case tabHistory:
+		keys = []string{"↑↓:metric", "←→:period", "r:refresh", "Tab:next"}
+	}
+
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(mutedStyle.Background(clrSurface).Render("  "))
+		}
+		parts := strings.SplitN(k, ":", 2)
+		if len(parts) == 2 {
+			b.WriteString(helpKeyStyle.Render(parts[0]))
+			b.WriteString(helpBarStyle.Render(" " + parts[1]))
+		} else {
+			b.WriteString(helpBarStyle.Render(k))
+		}
+	}
+
+	// right-side: next process refresh countdown
+	countdown := ""
+	if m.tab == tabProcesses && !m.procRefreshAt.IsZero() {
+		next := processRefreshInterval - time.Since(m.procRefreshAt)
+		if next < 0 {
+			next = 0
+		}
+		countdown = statusStyle.Render(fmt.Sprintf("  refresh in %ds", int(next.Seconds())))
+	}
+
+	left := b.String()
+	right := countdown
+	// fill gap between left and right
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 0 {
+		gap = 0
+	}
+	fill := helpBarStyle.Render(strings.Repeat(" ", gap))
+
+	return left + fill + right
 }
 
 func (m *Model) renderContent() string {
@@ -709,100 +854,150 @@ func (m *Model) renderContent() string {
 	return ""
 }
 
-func (m *Model) renderHelp() string {
-	var help string
-	switch m.tab {
-	case tabDashboard:
-		if m.tableDetail != nil {
-			if m.ttlInput.Focused() {
-				help = "[Enter] apply TTL  [Esc] cancel"
-			} else {
-				help = "[t] truncate  [l] edit TTL  [Esc] back  [r] refresh"
-			}
-		} else {
-			help = "[r] refresh  [Tab] next tab"
-		}
-	case tabTables:
-		help = "[↑/↓] select  [Enter] details  [r] refresh  [Tab] next tab"
-	case tabFatTables:
-		help = "[↑/↓] select  [Enter] details  [r] refresh  [Tab] next tab"
-	case tabProcesses:
-		help = "[↑/↓] scroll  [r] refresh  [Tab] next tab"
-	case tabHistory:
-		help = "[↑/↓] metric  [←/→] period  [r] refresh  [Tab] next tab"
-	}
-	return helpStyle.Width(m.width).Render("  " + help)
-}
-
-// --- content renderers -------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Content renderers
+// ---------------------------------------------------------------------------
 
 func (m *Model) renderDashboardContent() string {
+	if m.tableDetail != nil {
+		return m.renderTableDetailContent()
+	}
+	return m.renderMetricsContent()
+}
+
+func (m *Model) renderMetricsContent() string {
 	var b strings.Builder
 
-	if m.tableDetail != nil {
-		b.WriteString(sectionStyle.Render("Table Details") + "\n\n")
-		row := func(label, val string) string {
-			return labelStyle.Render(fmt.Sprintf("  %-16s", label)) +
-				valueStyle.Render(val) + "\n"
-		}
-		b.WriteString(row("Database:", m.tableDetail.Database))
-		b.WriteString(row("Table:", m.tableDetail.Name))
-		if m.tableDetail.Engine != "" {
-			b.WriteString(row("Engine:", m.tableDetail.Engine))
-		}
-		if m.tableDetail.SortingKey != "" {
-			b.WriteString(row("Sorting Key:", m.tableDetail.SortingKey))
-		}
-		if m.tableDetail.TTL != "" {
-			b.WriteString(row("Current TTL:", m.tableDetail.TTL))
-		}
-		b.WriteString("\n")
-		b.WriteString(sectionStyle.Render("Modify TTL") + "\n\n")
-		b.WriteString("  " + m.ttlInput.View() + "\n")
+	title := sectionStyle.Width(m.width - 2).Render(" System Metrics")
+	b.WriteString(title + "\n\n")
 
-		if m.actionMsg != "" {
-			b.WriteString("\n  " + valueStyle.Render(m.actionMsg) + "\n")
-		}
-		if m.connectErr != "" {
-			b.WriteString("\n  " + errorStyle.Render(m.connectErr) + "\n")
-		}
-		return b.String()
-	}
-
-	b.WriteString(sectionStyle.Render("System Metrics") + "\n\n")
 	if m.metrics == nil {
 		b.WriteString(mutedStyle.Render("  No metrics available") + "\n")
 		return b.String()
 	}
 
+	// Two-column card layout.
 	type kv struct{ label, value string }
-	rows := []kv{
+	left := []kv{
 		{"Version", m.metrics.Version},
-		{"Uptime", m.metrics.Uptime.String()},
-		{"Total Rows", fmt.Sprintf("%d", m.metrics.TotalRows)},
-		{"Total Bytes", formatBytes(m.metrics.TotalBytes)},
-		{"Background Pools", fmt.Sprintf("%d", m.metrics.BackgroundPools)},
-		{"Max Parts", fmt.Sprintf("%d", m.metrics.MaxPartsInPartition)},
+		{"Uptime", formatDuration(m.metrics.Uptime)},
+		{"Total Rows", humanize.Comma(int64(m.metrics.TotalRows))},
 	}
-	for _, r := range rows {
-		b.WriteString(labelStyle.Render(fmt.Sprintf("  %-20s", r.label)))
-		b.WriteString(valueStyle.Render(r.value) + "\n")
+	right := []kv{
+		{"Total Bytes", humanize.Bytes(m.metrics.TotalBytes)},
+		{"Background Pools", humanize.Comma(int64(m.metrics.BackgroundPools))},
+		{"Max Parts / Partition", humanize.Comma(int64(m.metrics.MaxPartsInPartition))},
+	}
+
+	colW := (m.width / 2) - 4
+	if colW < 20 {
+		colW = 20
+	}
+
+	renderCard := func(items []kv) string {
+		var s strings.Builder
+		for _, item := range items {
+			s.WriteString(labelStyle.Render(fmt.Sprintf("  %-22s", item.label)))
+			s.WriteString(valueStyle.Render(item.value))
+			s.WriteString("\n")
+		}
+		return cardStyle.Width(colW).Render(s.String())
+	}
+
+	row := lipgloss.JoinHorizontal(lipgloss.Top,
+		renderCard(left),
+		lipgloss.NewStyle().Width(2).Render(""),
+		renderCard(right),
+	)
+	b.WriteString(row + "\n")
+	return b.String()
+}
+
+func (m *Model) renderTableDetailContent() string {
+	var b strings.Builder
+
+	title := sectionStyle.Width(m.width - 2).Render(
+		fmt.Sprintf(" %s.%s", m.tableDetail.Database, m.tableDetail.Name),
+	)
+	b.WriteString(title + "\n\n")
+
+	type kv struct{ label, value string }
+	fields := []kv{
+		{"Database", m.tableDetail.Database},
+		{"Table", m.tableDetail.Name},
+	}
+	if m.tableDetail.Engine != "" {
+		fields = append(fields, kv{"Engine", m.tableDetail.Engine})
+	}
+	if m.tableDetail.SortingKey != "" {
+		fields = append(fields, kv{"Sorting Key", m.tableDetail.SortingKey})
+	}
+	if m.tableDetail.TTL != "" {
+		fields = append(fields, kv{"Current TTL", m.tableDetail.TTL})
+	}
+
+	var info strings.Builder
+	for _, f := range fields {
+		info.WriteString(labelStyle.Render(fmt.Sprintf("  %-16s", f.label)))
+		info.WriteString(dimValueStyle.Render(f.value) + "\n")
+	}
+	b.WriteString(cardStyle.Width(m.width-4).Render(info.String()) + "\n\n")
+
+	// TTL input section
+	b.WriteString(sectionStyle.Width(m.width-2).Render(" Modify TTL") + "\n\n")
+	b.WriteString("  " + m.ttlInput.View() + "\n")
+
+	if m.actionMsg != "" {
+		b.WriteString("\n  " + valueStyle.Render("✓ "+m.actionMsg) + "\n")
+	}
+	if m.connectErr != "" {
+		b.WriteString("\n  " + errorStyle.Render("✗ "+m.connectErr) + "\n")
 	}
 	return b.String()
 }
 
 func (m *Model) renderProcessesContent() string {
 	var b strings.Builder
-	b.WriteString(sectionStyle.Render("Running Processes") + "\n\n")
+
+	// Header with last-refreshed time
+	var ts string
+	if !m.procRefreshAt.IsZero() {
+		ts = mutedStyle.Render("  last updated " + m.procRefreshAt.Format("15:04:05"))
+	}
+	title := sectionStyle.Width(m.width - 2 - lipgloss.Width(ts)).Render(" Running Processes")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Bottom, title, ts) + "\n\n")
+
 	if len(m.queries) == 0 {
 		b.WriteString(mutedStyle.Render("  No running queries") + "\n")
 		return b.String()
 	}
+
+	cardW := m.width - 4
+	if cardW < 20 {
+		cardW = 20
+	}
+
 	for i, q := range m.queries {
-		b.WriteString(valueStyle.Render(fmt.Sprintf("  [%d] ", i+1)))
-		b.WriteString(labelStyle.Render(truncateStr(q.Query, 72)) + "\n")
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("      rows: %d  bytes: %s  mem: %s\n",
-			q.RowsRead, formatBytes(q.BytesRead), formatBytes(q.MemoryUsage))))
+		var card strings.Builder
+
+		// Query text
+		card.WriteString(queryNumStyle.Render(fmt.Sprintf("[%d] ", i+1)))
+		card.WriteString(queryTextStyle.Render(truncateStr(q.Query, cardW-6)) + "\n")
+
+		// Stats row
+		stats := fmt.Sprintf("rows: %-12s  read: %-10s  mem: %s",
+			humanize.Comma(int64(q.RowsRead)),
+			humanize.Bytes(q.BytesRead),
+			humanize.Bytes(q.MemoryUsage),
+		)
+		card.WriteString(mutedStyle.Render("    "+stats) + "\n")
+
+		// Memory bar (max display: 1 GB)
+		if q.MemoryUsage > 0 {
+			card.WriteString("    " + memBar(q.MemoryUsage, 1<<30, cardW-8) + "\n")
+		}
+
+		b.WriteString(queryCardStyle.Width(cardW).Render(card.String()) + "\n")
 	}
 	return b.String()
 }
@@ -811,52 +1006,117 @@ func (m *Model) renderHistoryContent() string {
 	var b strings.Builder
 
 	metric := historyMetrics[m.histMetricIdx]
-	period := historyPeriods[m.histPeriodIdx]
 
-	b.WriteString(sectionStyle.Render("Metrics History") + "\n\n")
-	b.WriteString(labelStyle.Render("  Metric: ") + valueStyle.Render(metric) + "\n")
-	b.WriteString(labelStyle.Render("  Period: ") + valueStyle.Render(period) + "\n\n")
+	title := sectionStyle.Width(m.width - 2).Render(" Metrics History")
+	b.WriteString(title + "\n\n")
+
+	// Selector row
+	b.WriteString(renderSelector("Metric", historyMetrics, m.histMetricIdx))
+	b.WriteString(renderSelector("Period", historyPeriods, m.histPeriodIdx))
+	b.WriteString("\n")
 
 	if len(m.historyData) == 0 {
 		b.WriteString(mutedStyle.Render("  No historical data yet — collected every 2 minutes.") + "\n")
 		return b.String()
 	}
 
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("  %-26s %-20s\n", "Timestamp", "Value")))
-	b.WriteString(mutedStyle.Render("  " + strings.Repeat("─", 48) + "\n"))
+	// Find max value for the sparkline bar.
+	var maxVal int64
+	for _, s := range m.historyData {
+		if s.Value > maxVal {
+			maxVal = s.Value
+		}
+	}
+
+	barW := 24
+	b.WriteString(mutedStyle.Render(fmt.Sprintf("  %-20s  %-20s  %s\n",
+		"Timestamp", "Value", strings.Repeat("▒", barW))))
+	b.WriteString(mutedStyle.Render("  " + strings.Repeat("─", 20+2+20+2+barW) + "\n"))
+
 	for _, s := range m.historyData {
 		val := formatHistoryValue(metric, s.Value)
-		b.WriteString(labelStyle.Render(fmt.Sprintf("  %-26s", s.At.Format("2006-01-02 15:04:05"))))
-		b.WriteString(valueStyle.Render(val) + "\n")
+		bar := sparkBar(s.Value, maxVal, barW)
+		b.WriteString(
+			labelStyle.Render(fmt.Sprintf("  %-20s", s.At.Format("2006-01-02 15:04:05"))) +
+				valueStyle.Render(fmt.Sprintf("  %-20s", val)) +
+				bar + "\n",
+		)
 	}
 	return b.String()
 }
 
-// --- helpers -----------------------------------------------------------------
+// renderSelector renders a labelled row of selectable options, with the active
+// one highlighted.
+func renderSelector(label string, options []string, active int) string {
+	var b strings.Builder
+	b.WriteString(labelStyle.Render(fmt.Sprintf("  %-8s", label+":")))
+	for i, opt := range options {
+		if i == active {
+			b.WriteString(activeTabStyle.Render(" " + opt + " "))
+		} else {
+			b.WriteString(inactiveTabStyle.Render(" " + opt + " "))
+		}
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// ---------------------------------------------------------------------------
+// Visual helpers
+// ---------------------------------------------------------------------------
+
+// sparkBar renders a coloured horizontal bar scaled to [0, maxVal].
+func sparkBar(val, maxVal int64, width int) string {
+	if maxVal <= 0 || width <= 0 {
+		return ""
+	}
+	filled := int(float64(val) / float64(maxVal) * float64(width))
+	if filled > width {
+		filled = width
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	// colour: green → yellow → red based on proportion
+	ratio := float64(val) / float64(maxVal)
+	var style lipgloss.Style
+	switch {
+	case ratio >= 0.75:
+		style = lipgloss.NewStyle().Foreground(clrRed)
+	case ratio >= 0.40:
+		style = lipgloss.NewStyle().Foreground(clrYellow)
+	default:
+		style = lipgloss.NewStyle().Foreground(clrGreen)
+	}
+	return style.Render(bar)
+}
+
+// memBar renders a small memory-usage progress bar.
+func memBar(used, total uint64, width int) string {
+	if total == 0 || width <= 0 {
+		return ""
+	}
+	return sparkBar(int64(used), int64(total), width)
+}
+
+// formatDuration pretty-prints a duration with days when ≥24 h.
+func formatDuration(d time.Duration) string {
+	if d >= 24*time.Hour {
+		days := int(d.Hours()) / 24
+		h := int(d.Hours()) % 24
+		return fmt.Sprintf("%dd %dh", days, h)
+	}
+	return d.Truncate(time.Second).String()
+}
 
 func formatHistoryValue(metric string, v int64) string {
 	switch metric {
 	case "total_bytes":
-		return formatBytes(uint64(v))
+		return humanize.Bytes(uint64(v))
 	case "total_rows":
-		return fmt.Sprintf("%d rows", v)
+		return humanize.Comma(v) + " rows"
 	case "uptime":
-		return (time.Duration(v) * time.Second).String()
+		return formatDuration(time.Duration(v) * time.Second)
 	}
-	return fmt.Sprintf("%d", v)
-}
-
-func formatBytes(bytes uint64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := uint64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+	return humanize.Comma(v)
 }
 
 func truncateStr(s string, max int) string {

@@ -2,12 +2,14 @@ package ui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/athoune/clickhouse-watcher/internal/clickhouse"
 	"github.com/athoune/clickhouse-watcher/rrd"
 	tea "github.com/charmbracelet/bubbletea"
+	humanize "github.com/dustin/go-humanize"
 )
 
 // newTestModel returns a Model wired to a non-existent socket so no real
@@ -353,26 +355,159 @@ func TestWindowSizeMsgResizesPanes(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// formatBytes helper
+// humanize integration — spot-check the values produced in the TUI
 // ---------------------------------------------------------------------------
 
-func TestFormatBytes(t *testing.T) {
+func TestHumanizeBytes(t *testing.T) {
+	// humanize.Bytes uses SI (base-10) units, not binary.
 	cases := []struct {
 		input uint64
 		want  string
 	}{
 		{0, "0 B"},
 		{512, "512 B"},
-		{1024, "1.0 KB"},
-		{1536, "1.5 KB"},
+		{1024, "1.0 kB"},
+		{1536, "1.5 kB"},
 		{1024 * 1024, "1.0 MB"},
-		{1024 * 1024 * 1024, "1.0 GB"},
 	}
 	for _, c := range cases {
-		got := formatBytes(c.input)
+		got := humanize.Bytes(c.input)
 		if got != c.want {
-			t.Errorf("formatBytes(%d) = %q, want %q", c.input, got, c.want)
+			t.Errorf("humanize.Bytes(%d) = %q, want %q", c.input, got, c.want)
 		}
+	}
+}
+
+func TestHumanizeComma(t *testing.T) {
+	cases := []struct {
+		input int64
+		want  string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1,000"},
+		{1_000_000, "1,000,000"},
+	}
+	for _, c := range cases {
+		got := humanize.Comma(c.input)
+		if got != c.want {
+			t.Errorf("humanize.Comma(%d) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// processTickMsg triggers a queries fetch and re-schedules itself
+// ---------------------------------------------------------------------------
+
+func TestProcessTickMsgFetchesQueries(t *testing.T) {
+	m := newTestModel()
+	// processTickMsg should always return a non-nil Cmd (to re-schedule).
+	_, cmd := m.Update(processTickMsg{})
+	if cmd == nil {
+		t.Error("processTickMsg should return a Cmd (re-schedule tick + fetch queries)")
+	}
+}
+
+func TestQueriesMsgSetsRefreshTimestamp(t *testing.T) {
+	m := newTestModel()
+	before := time.Now()
+	m, _ = func() (*Model, tea.Cmd) {
+		updated, cmd := m.Update(queriesMsg{queries: []clickhouse.QueryMetric{
+			{Query: "SELECT 1"},
+		}})
+		return updated.(*Model), cmd
+	}()
+	if m.procRefreshAt.Before(before) {
+		t.Error("procRefreshAt should be updated after queriesMsg")
+	}
+}
+
+func TestHelpBarShowsCountdownOnProcessesTab(t *testing.T) {
+	m := newTestModel()
+	m.tab = tabProcesses
+	m.procRefreshAt = time.Now().Add(-3 * time.Second) // 3s ago → 7s remaining
+
+	bar := m.renderHelpBar()
+	if !strings.Contains(bar, "refresh in") {
+		t.Errorf("help bar should show countdown on Processes tab, got: %q", bar)
+	}
+}
+
+func TestHelpBarNoCountdownOnOtherTabs(t *testing.T) {
+	m := newTestModel()
+	m.tab = tabDashboard
+	m.procRefreshAt = time.Now()
+
+	bar := m.renderHelpBar()
+	if strings.Contains(bar, "refresh in") {
+		t.Errorf("help bar should not show countdown on non-Processes tab")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// formatDuration helper
+// ---------------------------------------------------------------------------
+
+func TestFormatDuration(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "30s"},
+		{90 * time.Second, "1m30s"},
+		{time.Hour, "1h0m0s"},
+		{25 * time.Hour, "1d 1h"},
+		{48 * time.Hour, "2d 0h"},
+	}
+	for _, c := range cases {
+		got := formatDuration(c.d)
+		if got != c.want {
+			t.Errorf("formatDuration(%v) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sparkBar helper
+// ---------------------------------------------------------------------------
+
+func TestSparkBarEmpty(t *testing.T) {
+	if got := sparkBar(0, 0, 10); got != "" {
+		t.Errorf("sparkBar(0,0,10) should be empty, got %q", got)
+	}
+}
+
+func TestSparkBarFull(t *testing.T) {
+	// 100% fill — the rendered string should contain only block chars.
+	rendered := sparkBar(100, 100, 10)
+	// lipgloss adds ANSI codes, so just check we get something non-empty.
+	if rendered == "" {
+		t.Error("sparkBar(100,100,10) should not be empty")
+	}
+}
+
+func TestSparkBarHalf(t *testing.T) {
+	rendered := sparkBar(50, 100, 10)
+	if rendered == "" {
+		t.Error("sparkBar(50,100,10) should not be empty")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// memBar helper
+// ---------------------------------------------------------------------------
+
+func TestMemBarZeroTotal(t *testing.T) {
+	if got := memBar(100, 0, 10); got != "" {
+		t.Errorf("memBar with zero total should return empty string, got %q", got)
+	}
+}
+
+func TestMemBarNonZero(t *testing.T) {
+	got := memBar(512*1024*1024, 1024*1024*1024, 20)
+	if got == "" {
+		t.Error("memBar should return non-empty string for non-zero usage")
 	}
 }
 
@@ -397,23 +532,22 @@ func TestTruncateStr(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFormatHistoryValue(t *testing.T) {
-	got := formatHistoryValue("total_bytes", 1024)
-	if got != "1.0 KB" {
-		t.Errorf("expected '1.0 KB', got %q", got)
+	cases := []struct {
+		metric string
+		value  int64
+		want   string
+	}{
+		{"total_bytes", 1024, humanize.Bytes(1024)}, // "1.0 kB"
+		{"total_rows", 1_000_000, "1,000,000 rows"},
+		{"total_rows", 42, "42 rows"},
+		{"uptime", 3600, "1h0m0s"},
+		{"unknown", 99, humanize.Comma(99)},       // "99"
+		{"unknown", 1_000, humanize.Comma(1_000)}, // "1,000"
 	}
-
-	got = formatHistoryValue("total_rows", 42)
-	if got != "42 rows" {
-		t.Errorf("expected '42 rows', got %q", got)
-	}
-
-	got = formatHistoryValue("uptime", 3600)
-	if got != "1h0m0s" {
-		t.Errorf("expected '1h0m0s', got %q", got)
-	}
-
-	got = formatHistoryValue("unknown", 99)
-	if got != "99" {
-		t.Errorf("expected '99', got %q", got)
+	for _, c := range cases {
+		got := formatHistoryValue(c.metric, c.value)
+		if got != c.want {
+			t.Errorf("formatHistoryValue(%q, %d) = %q, want %q", c.metric, c.value, got, c.want)
+		}
 	}
 }
