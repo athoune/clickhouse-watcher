@@ -197,6 +197,51 @@ func TestGetRunningQueries(t *testing.T) {
 	t.Logf("Current running queries: %d", len(queries))
 }
 
+func TestGetTruncatableTables(t *testing.T) {
+	client := getTestClient(t)
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := client.Exec(ctx, "CREATE TABLE IF NOT EXISTS test_truncatable (id UInt64, name String) ENGINE = MergeTree() ORDER BY id")
+	if err != nil {
+		t.Fatalf("Failed to create test table: %v", err)
+	}
+	defer client.Exec(ctx, "DROP TABLE IF EXISTS test_truncatable")
+
+	err = client.Exec(ctx, "INSERT INTO test_truncatable VALUES (1, 'test1'), (2, 'test2'), (3, 'test3')")
+	if err != nil {
+		t.Fatalf("Failed to insert test data: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	tables, err := client.GetTruncatableTables(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get truncatable tables: %v", err)
+	}
+
+	found := false
+	for _, tbl := range tables {
+		if tbl.Database == "test" && tbl.Table == "test_truncatable" {
+			found = true
+			t.Logf("Found table: %s.%s, Size: %s, Rows: %d, Truncatable: %v",
+				tbl.Database, tbl.Table, tbl.Size, tbl.Rows, tbl.Truncatable)
+			if tbl.Rows == 0 {
+				t.Error("Expected rows to be greater than 0")
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected to find test_truncatable in the list")
+	}
+
+	t.Logf("Found %d truncatable tables", len(tables))
+}
+
 func getTestClient(t *testing.T) *clickhouse.Client {
 	conn := clickhouse.Connection{
 		Host:     getEnvOrDefault("CH_HOST", "localhost"),

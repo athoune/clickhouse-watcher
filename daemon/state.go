@@ -270,3 +270,15 @@ func (s *State) GetCHClientForTest() *clickhouse.Client {
 	defer s.mu.RUnlock()
 	return s.client
 }
+
+func (s *State) GetTruncatableTables(ctx context.Context) ([]clickhouse.TruncatableTable, error) {
+	s.mu.RLock()
+	client := s.client
+	s.mu.RUnlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	return client.GetTruncatableTables(ctx)
+}

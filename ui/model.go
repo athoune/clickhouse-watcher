@@ -3,12 +3,12 @@ package ui
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/athoune/clickhouse-watcher/client"
 	"github.com/athoune/clickhouse-watcher/internal/clickhouse"
 	"github.com/athoune/clickhouse-watcher/rrd"
+	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -21,6 +21,7 @@ type Model struct {
 	err           error
 	metrics       *clickhouse.SystemMetrics
 	tables        []clickhouse.TableMetric
+	truncatables  []clickhouse.TruncatableTable
 	queries       []clickhouse.QueryMetric
 	queryInput    string
 	results       [][]string
@@ -35,6 +36,7 @@ type Model struct {
 	historyData   []rrd.Sample
 	historyPeriod string
 	historyMetric string
+	fatTable      table.Model
 }
 
 const (
@@ -99,10 +101,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.fatTable.SetWidth(msg.Width)
 		return m, nil
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		if m.tab == tabFatTables {
+			teaModel, cmd := m.fatTable.Update(msg)
+			m.fatTable = teaModel
+			if cmd != nil {
+				return m, cmd
+			}
+			if msg.Type == tea.KeyEnter {
+				return m, m.handleFatTableSelect()
+			}
+			return m, nil
+		}
+		_, cmd := m.handleKey(msg)
+		return m, cmd
 
 	case tickMsg:
 		return m, nil
@@ -122,7 +137,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.nextTab()
 
 	case tea.KeyUp:
-		if (m.tab == tabTables || m.tab == tabFatTables) && m.selectedIdx > 0 {
+		if m.tab == tabTables && m.selectedIdx > 0 {
 			m.selectedIdx--
 		}
 		if m.tab == tabHistory {
@@ -130,7 +145,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyDown:
-		if (m.tab == tabTables || m.tab == tabFatTables) && m.selectedIdx < len(m.tables)-1 {
+		if m.tab == tabTables && m.selectedIdx < len(m.tables)-1 {
 			m.selectedIdx++
 		}
 		if m.tab == tabHistory {
@@ -150,11 +165,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyEnter:
-		if m.tab == tabTables || m.tab == tabFatTables {
+		if m.tab == tabTables {
 			return m, m.showTableDetail()
-		}
-		if m.tab == tabDashboard && m.actionMsg == "confirm" {
-			return m, m.executeTruncate()
 		}
 
 	case tea.KeyBackspace:
@@ -244,6 +256,12 @@ func (m *Model) connect() tea.Cmd {
 			m.tables = tables
 		}
 
+		truncatables, err := m.daemon.GetTruncatableTables(ctx)
+		if err == nil {
+			m.truncatables = truncatables
+			m.initFatTable()
+		}
+
 		queries, err := m.daemon.GetQueries(ctx)
 		if err == nil {
 			m.queries = queries
@@ -253,6 +271,38 @@ func (m *Model) connect() tea.Cmd {
 		time.Sleep(500 * time.Millisecond)
 		return tickMsg{}
 	}
+}
+
+func (m *Model) initFatTable() {
+	columns := []table.Column{
+		{Title: "Database", Width: 20},
+		{Title: "Table", Width: 25},
+		{Title: "Size", Width: 15},
+		{Title: "Rows", Width: 12},
+		{Title: "Truncatable", Width: 12},
+	}
+
+	var rows []table.Row
+	for _, t := range m.truncatables {
+		truncatable := "No"
+		if t.Truncatable {
+			truncatable = "Yes"
+		}
+		rows = append(rows, table.Row{
+			t.Database,
+			t.Table,
+			formatBytes(t.Size),
+			fmt.Sprintf("%d", t.Rows),
+			truncatable,
+		})
+	}
+
+	m.fatTable = table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(true),
+		table.WithHeight(20),
+	)
 }
 
 func (m *Model) refresh() tea.Cmd {
@@ -271,6 +321,11 @@ func (m *Model) refresh() tea.Cmd {
 			tables, err := m.daemon.GetTables(ctx)
 			if err == nil {
 				m.tables = tables
+			}
+			truncatables, err := m.daemon.GetTruncatableTables(ctx)
+			if err == nil {
+				m.truncatables = truncatables
+				m.initFatTable()
 			}
 		case tabProcesses:
 			queries, err := m.daemon.GetQueries(ctx)
@@ -297,6 +352,22 @@ func (m *Model) showTableDetail() tea.Cmd {
 			Name:     t.Name,
 		}
 		m.ttlInput = ""
+		return nil
+	}
+}
+
+func (m *Model) handleFatTableSelect() tea.Cmd {
+	return func() tea.Msg {
+		row := m.fatTable.Cursor()
+		if row < len(m.truncatables) {
+			t := m.truncatables[row]
+			m.tableDetail = &clickhouse.TableDetail{
+				Database: t.Database,
+				Name:     t.Table,
+			}
+			m.ttlInput = ""
+			m.tab = tabDashboard
+		}
 		return nil
 	}
 }
@@ -348,32 +419,30 @@ func (m *Model) modifyTTL() tea.Cmd {
 }
 
 func (m *Model) View() string {
-	var b strings.Builder
+	var s string
 
 	if m.loading || m.err != nil {
 		return m.connectView()
 	}
 
-	b.WriteString(m.renderTabBar())
-	b.WriteString("\n")
-	b.WriteString(m.renderContent())
-	b.WriteString(m.renderHelp())
+	s += m.renderTabBar()
+	s += "\n"
+	s += m.renderContent()
+	s += m.renderHelp()
 
-	return b.String()
+	return s
 }
 
 func (m *Model) renderTabBar() string {
-	var b strings.Builder
-
+	var s string
 	for i, name := range tabNames {
 		if i == m.tab {
-			b.WriteString(activeTabStyle.Render(name))
+			s += activeTabStyle.Render(name)
 		} else {
-			b.WriteString(inactiveTabStyle.Render(name))
+			s += inactiveTabStyle.Render(name)
 		}
 	}
-
-	return tabBarStyle.Render(b.String())
+	return tabBarStyle.Render(s)
 }
 
 func (m *Model) renderHelp() string {
@@ -383,8 +452,10 @@ func (m *Model) renderHelp() string {
 			return helpBarStyle.Render(" [t] Truncate  [l] Apply TTL  [z] Back  [r] Refresh")
 		}
 		return helpBarStyle.Render(" [r] Refresh  [Tab] Next")
-	case tabTables, tabFatTables:
+	case tabTables:
 		return helpBarStyle.Render(" [↑/↓] Select  [Enter] Details  [r] Refresh")
+	case tabFatTables:
+		return helpBarStyle.Render(" [↑/↓] Select  [Enter] Table Details  [r] Refresh")
 	case tabProcesses:
 		return helpBarStyle.Render(" [r] Refresh  [Tab] Next")
 	case tabHistory:
@@ -422,65 +493,65 @@ const asciiLogo = `
 `
 
 func (m *Model) connectView() string {
-	var b strings.Builder
+	var s string
 
 	bg := lipgloss.Color("#1A1A2E")
 	fg := lipgloss.Color("#00D9FF")
 
-	b.WriteString(lipgloss.NewStyle().
+	s += lipgloss.NewStyle().
 		Background(bg).
 		Foreground(fg).
 		Width(m.width).
 		Height(m.height).
 		Align(lipgloss.Center).
-		Render(""))
+		Render("")
 
-	b.WriteString(lipgloss.NewStyle().
+	s += lipgloss.NewStyle().
 		Foreground(fg).
 		Bold(true).
 		Align(lipgloss.Center).
 		Width(m.width).
-		Render(asciiLogo))
-	b.WriteString("\n\n")
+		Render(asciiLogo)
+	s += "\n\n"
 
 	if m.loading {
-		b.WriteString(contentStyle.Render("  Connecting to "))
-		b.WriteString(valueStyle.Render(m.daemon.SocketPath()))
-		b.WriteString("...\n")
+		s += contentStyle.Render("  Connecting to ")
+		s += valueStyle.Render(m.daemon.SocketPath())
+		s += "...\n"
 	} else if m.err != nil {
-		b.WriteString(errorStyle.Render("  Connection failed: " + m.err.Error() + "\n"))
-		b.WriteString("\n")
-		b.WriteString(contentStyle.Render("  Press ESC to quit\n"))
+		s += errorStyle.Render("  Connection failed: " + m.err.Error() + "\n")
+		s += "\n"
+		s += contentStyle.Render("  Press ESC to quit\n")
 	}
 
-	return b.String()
+	return s
 }
 
 func (m *Model) dashboardView() string {
-	var b strings.Builder
+	var s string
 
 	if m.tableDetail != nil {
-		b.WriteString(sectionStyle.Render("\n  Table Details\n\n"))
-		b.WriteString(contentStyle.Render(fmt.Sprintf("  %-15s %s\n", "Database:", m.tableDetail.Database)))
-		b.WriteString(contentStyle.Render(fmt.Sprintf("  %-15s %s\n", "Name:", m.tableDetail.Name)))
-		b.WriteString(contentStyle.Render(fmt.Sprintf("  %-15s %s\n", "Engine:", m.tableDetail.Engine)))
-		b.WriteString(contentStyle.Render(fmt.Sprintf("  %-15s %s\n", "Sorting Key:", m.tableDetail.SortingKey)))
-		b.WriteString("\n")
-		b.WriteString(sectionStyle.Render("  TTL\n"))
-		b.WriteString("\n")
-		b.WriteString(valueStyle.Render("  > " + m.ttlInput + "\n"))
+		s += sectionStyle.Render("\n  Table Details\n\n")
+		s += contentStyle.Render(fmt.Sprintf("  %-15s %s\n", "Database:", m.tableDetail.Database))
+		s += contentStyle.Render(fmt.Sprintf("  %-15s %s\n", "Name:", m.tableDetail.Name))
+		s += contentStyle.Render(fmt.Sprintf("  %-15s %s\n", "Engine:", m.tableDetail.Engine))
+		s += contentStyle.Render(fmt.Sprintf("  %-15s %s\n", "Sorting Key:", m.tableDetail.SortingKey))
+		s += "\n"
+		s += sectionStyle.Render("  TTL\n")
+		s += "\n"
+		s += valueStyle.Render("  > " + m.ttlInput + "\n")
 
 		if m.err != nil {
-			b.WriteString(errorStyle.Render("\n  Error: " + m.err.Error() + "\n"))
+			s += errorStyle.Render("\n  Error: " + m.err.Error() + "\n")
 		}
-		return b.String()
+		return s
 	}
 
-	b.WriteString(sectionStyle.Render("\n  System Metrics\n\n"))
+	s += sectionStyle.Render("\n  System Metrics\n\n")
 
 	if m.metrics == nil {
-		b.WriteString(contentStyle.Render("  No metrics available\n"))
-		return b.String()
+		s += contentStyle.Render("  No metrics available\n")
+		return s
 	}
 
 	metrics := []struct {
@@ -495,25 +566,25 @@ func (m *Model) dashboardView() string {
 		{"Max Parts", fmt.Sprintf("%d", m.metrics.MaxPartsInPartition)},
 	}
 
-	for _, m := range metrics {
-		b.WriteString(contentStyle.Render(fmt.Sprintf("  %-20s", m.label)))
-		b.WriteString(valueStyle.Render(fmt.Sprintf("%s\n", m.value)))
+	for _, met := range metrics {
+		s += contentStyle.Render(fmt.Sprintf("  %-20s", met.label))
+		s += valueStyle.Render(fmt.Sprintf("%s\n", met.value))
 	}
 
-	return b.String()
+	return s
 }
 
 func (m *Model) tablesView() string {
-	var b strings.Builder
-	b.WriteString(sectionStyle.Render("\n  Tables\n\n"))
+	var s string
+	s += sectionStyle.Render("\n  Tables\n\n")
 
 	if len(m.tables) == 0 {
-		b.WriteString(contentStyle.Render("  No tables found\n"))
-		return b.String()
+		s += contentStyle.Render("  No tables found\n")
+		return s
 	}
 
-	b.WriteString(contentStyle.Render(fmt.Sprintf("  %-25s %-15s %-15s %-12s %-12s\n", "Name", "Database", "Size", "Min Date", "Max Date")))
-	b.WriteString(contentStyle.Render("  " + strings.Repeat("-", 85) + "\n"))
+	s += contentStyle.Render(fmt.Sprintf("  %-25s %-15s %-15s %-12s %-12s\n", "Name", "Database", "Size", "Min Date", "Max Date"))
+	s += contentStyle.Render("  " + repeat("-", 85) + "\n")
 
 	for i, t := range m.tables {
 		prefix := "  "
@@ -522,92 +593,70 @@ func (m *Model) tablesView() string {
 			prefix = "> "
 			style = valueStyle
 		}
-		b.WriteString(style.Render(fmt.Sprintf("%s%-25s %-15s %-15s %-12s %-12s\n",
-			prefix, truncate(t.Name, 23), truncate(t.Database, 13), t.Size, t.MinDate, t.MaxDate)))
+		s += style.Render(fmt.Sprintf("%s%-25s %-15s %-15s %-12s %-12s\n",
+			prefix, truncate(t.Name, 23), truncate(t.Database, 13), t.Size, t.MinDate, t.MaxDate))
 	}
 
-	return b.String()
+	return s
 }
 
 func (m *Model) fatTablesView() string {
-	var b strings.Builder
-	b.WriteString(sectionStyle.Render("\n  Fat Tables (by size)\n\n"))
-
-	if len(m.tables) == 0 {
-		b.WriteString(contentStyle.Render("  No tables found\n"))
-		return b.String()
-	}
-
-	b.WriteString(contentStyle.Render(fmt.Sprintf("  %-25s %-15s %-15s %-12s %-12s\n", "Name", "Database", "Size", "Min Date", "Max Date")))
-	b.WriteString(contentStyle.Render("  " + strings.Repeat("-", 85) + "\n"))
-
-	for i, t := range m.tables {
-		prefix := "  "
-		style := contentStyle
-		if i == m.selectedIdx {
-			prefix = "> "
-			style = valueStyle
-		}
-		b.WriteString(style.Render(fmt.Sprintf("%s%-25s %-15s %-15s %-12s %-12s\n",
-			prefix, truncate(t.Name, 23), truncate(t.Database, 13), t.Size, t.MinDate, t.MaxDate)))
-	}
-
-	return b.String()
+	return m.fatTable.View()
 }
 
 func (m *Model) processesView() string {
-	var b strings.Builder
-	b.WriteString(sectionStyle.Render("\n  Running Processes\n\n"))
+	var s string
+	s += sectionStyle.Render("\n  Running Processes\n\n")
 
 	if len(m.queries) == 0 {
-		b.WriteString(contentStyle.Render("  No running queries\n"))
-		return b.String()
+		s += contentStyle.Render("  No running queries\n")
+		return s
 	}
 
 	for i, q := range m.queries {
-		b.WriteString(valueStyle.Render(fmt.Sprintf("  [%d] %s\n", i+1, truncate(q.Query, 70))))
-		b.WriteString(contentStyle.Render(fmt.Sprintf("      Rows: %d | Bytes: %s | Memory: %s\n",
-			q.RowsRead, formatBytes(q.BytesRead), formatBytes(q.MemoryUsage))))
+		s += valueStyle.Render(fmt.Sprintf("  [%d] %s\n", i+1, truncate(q.Query, 70)))
+		s += contentStyle.Render(fmt.Sprintf("      Rows: %d | Bytes: %s | Memory: %s\n",
+			q.RowsRead, formatBytes(q.BytesRead), formatBytes(q.MemoryUsage)))
 	}
 
-	return b.String()
+	return s
 }
 
 func (m *Model) historyView() string {
-	var b strings.Builder
-	b.WriteString(sectionStyle.Render("\n  Metrics History\n\n"))
+	var s string
+	s += sectionStyle.Render("\n  Metrics History\n\n")
 
-	b.WriteString(contentStyle.Render("  Metric: "))
-	b.WriteString(valueStyle.Render(m.historyMetric + "\n"))
-	b.WriteString(contentStyle.Render("  Period: "))
-	b.WriteString(valueStyle.Render(m.historyPeriod + "\n\n"))
+	s += contentStyle.Render("  Metric: ")
+	s += valueStyle.Render(m.historyMetric + "\n")
+	s += contentStyle.Render("  Period: ")
+	s += valueStyle.Render(m.historyPeriod + "\n\n")
 
 	if len(m.historyData) == 0 {
-		b.WriteString(contentStyle.Render("  No historical data available.\n"))
-		b.WriteString(contentStyle.Render("  Data is collected every 2 minutes.\n"))
-		return b.String()
+		s += contentStyle.Render("  No historical data available.\n")
+		s += contentStyle.Render("  Data is collected every 2 minutes.\n")
+		return s
 	}
 
-	b.WriteString(contentStyle.Render(fmt.Sprintf("  %-25s %-20s\n", "Timestamp", "Value")))
-	b.WriteString(contentStyle.Render("  " + strings.Repeat("-", 50) + "\n"))
+	s += contentStyle.Render(fmt.Sprintf("  %-25s %-20s\n", "Timestamp", "Value"))
+	s += contentStyle.Render("  " + repeat("-", 50) + "\n")
 
-	for _, s := range m.historyData {
+	for _, sample := range m.historyData {
 		var valueStr string
 		switch m.historyMetric {
 		case "total_bytes":
-			valueStr = formatBytes(uint64(s.Value))
+			valueStr = formatBytes(uint64(sample.Value))
 		case "total_rows":
-			valueStr = fmt.Sprintf("%d rows", s.Value)
+			valueStr = fmt.Sprintf("%d rows", sample.Value)
 		case "uptime":
-			valueStr = (time.Duration(s.Value) * time.Second).String()
+			valueStr = (time.Duration(sample.Value) * time.Second).String()
 		default:
-			valueStr = fmt.Sprintf("%d", s.Value)
+			valueStr = fmt.Sprintf("%d", sample.Value)
 		}
-		b.WriteString(contentStyle.Render(fmt.Sprintf("  %-25s %-20s\n",
-			s.At.Format("2006-01-02 15:04:05"), valueStr)))
+		s += contentStyle.Render(fmt.Sprintf("  %-25s %-20s\n",
+			sample.At.Format("2006-01-02 15:04:05"), valueStr))
 	}
 
-	return b.String()
+	return s
 }
 
 func formatBytes(bytes uint64) string {
@@ -628,4 +677,12 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-2] + ".."
+}
+
+func repeat(s string, count int) string {
+	var result string
+	for i := 0; i < count; i++ {
+		result += s
+	}
+	return result
 }

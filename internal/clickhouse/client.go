@@ -56,7 +56,7 @@ type TruncatableTable struct {
 	Database    string
 	Table       string
 	Rows        uint64
-	Size        uint64
+	Size        string
 	Truncatable bool
 }
 type QueryResult struct {
@@ -282,7 +282,7 @@ ORDER BY p.bytes_raw DESC
 	var tables []TruncatableTable
 	for rows.Next() {
 		var line TruncatableTable
-		err = rows.Scan(&line.Table, &line.Database, &line.Size, &line.Rows, &line.Truncatable)
+		err = rows.Scan(&line.Database, &line.Table, &line.Size, &line.Rows, &line.Truncatable)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan query response: %w", err)
 		}

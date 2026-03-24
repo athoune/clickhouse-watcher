@@ -251,3 +251,29 @@ func (c *Client) GetHistory(metric, period string) ([]rrd.Sample, error) {
 
 	return result, nil
 }
+
+// GetTruncatableTables retrieves tables with their size and truncatability info.
+func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.TruncatableTable, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/truncatables", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Transport: c.unixTransport()}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status: %d", resp.StatusCode)
+	}
+
+	var result []clickhouse.TruncatableTable
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}

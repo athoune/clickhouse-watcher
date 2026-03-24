@@ -93,6 +93,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleMetrics(w, r)
 	case path == "tables":
 		s.handleTables(w, r)
+	case path == "truncatables":
+		s.handleTruncatables(w, r)
 	case path == "queries":
 		s.handleQueries(w, r)
 	case strings.HasPrefix(path, "history/"):
@@ -134,6 +136,21 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 	tables := s.state.GetTables()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tables)
+}
+
+func (s *Server) handleTruncatables(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	tables, err := s.state.GetTruncatableTables(ctx)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tables)
 }
