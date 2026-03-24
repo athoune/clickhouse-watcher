@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -15,73 +14,41 @@ import (
 	"github.com/athoune/clickhouse-watcher/rrd"
 )
 
+// Client communicates with the daemon via HTTP over Unix socket.
 type Client struct {
 	socketPath string
-	httpClient *http.Client
 }
 
+// NewClient creates a client that connects to the daemon at the given socket path.
 func NewClient(socketPath string) *Client {
 	return &Client{
 		socketPath: socketPath,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
 	}
 }
 
+// SocketPath returns the Unix socket path used for connections.
 func (c *Client) SocketPath() string {
 	return c.socketPath
 }
 
-func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
-	u := &url.URL{
-		Scheme: "http",
-		Host:   "localhost",
-		Path:   path,
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("request creation failed: %w", err)
-	}
-
-	transport := &http.Transport{
+// unixTransport returns an HTTP transport that dials the Unix socket.
+func (c *Client) unixTransport() *http.Transport {
+	return &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", c.socketPath)
 		},
 	}
-
-	c.httpClient.Transport = transport
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
-	}
-
-	var result []byte
-	return result, nil
 }
 
+// IsConnected checks if the daemon is available and responding.
 func (c *Client) IsConnected(ctx context.Context) (bool, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/api/status", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/status", nil)
 	if err != nil {
 		return false, err
 	}
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", c.socketPath)
-		},
-	}
-
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, nil
@@ -91,20 +58,14 @@ func (c *Client) IsConnected(ctx context.Context) (bool, error) {
 	return resp.StatusCode == http.StatusOK, nil
 }
 
+// GetMetrics retrieves system metrics from the daemon.
 func (c *Client) GetMetrics(ctx context.Context) (*clickhouse.SystemMetrics, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/api/metrics", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/metrics", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", c.socketPath)
-		},
-	}
-
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -123,20 +84,14 @@ func (c *Client) GetMetrics(ctx context.Context) (*clickhouse.SystemMetrics, err
 	return &result, nil
 }
 
+// GetTables retrieves the list of tables from the daemon.
 func (c *Client) GetTables(ctx context.Context) ([]clickhouse.TableMetric, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/api/tables", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/tables", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", c.socketPath)
-		},
-	}
-
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -155,20 +110,14 @@ func (c *Client) GetTables(ctx context.Context) ([]clickhouse.TableMetric, error
 	return result, nil
 }
 
+// GetQueries retrieves currently running queries from the daemon.
 func (c *Client) GetQueries(ctx context.Context) ([]clickhouse.QueryMetric, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/api/queries", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/queries", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", c.socketPath)
-		},
-	}
-
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -187,24 +136,18 @@ func (c *Client) GetQueries(ctx context.Context) ([]clickhouse.QueryMetric, erro
 	return result, nil
 }
 
+// ExecuteQuery executes a SQL query via the daemon and returns the results.
 func (c *Client) ExecuteQuery(ctx context.Context, query string) (*clickhouse.QueryResult, error) {
 	body, _ := json.Marshal(map[string]string{"query": query})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost/api/query", nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://unix/api/query", nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Body = io.NopCloser(strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", c.socketPath)
-		},
-	}
-
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -223,27 +166,21 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*clickhouse.Qu
 	return &result, nil
 }
 
+// TruncateTable truncates a table via the daemon.
 func (c *Client) TruncateTable(ctx context.Context, database, table string) error {
 	body, _ := json.Marshal(map[string]string{
 		"database": database,
 		"table":    table,
 	})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost/api/truncate", nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://unix/api/truncate", nil)
 	if err != nil {
 		return err
 	}
 	req.Body = io.NopCloser(strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", c.socketPath)
-		},
-	}
-
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -257,6 +194,7 @@ func (c *Client) TruncateTable(ctx context.Context, database, table string) erro
 	return nil
 }
 
+// ModifyTTL modifies or removes the TTL of a table via the daemon.
 func (c *Client) ModifyTTL(ctx context.Context, database, table, ttl string) error {
 	body, _ := json.Marshal(map[string]string{
 		"database": database,
@@ -264,21 +202,14 @@ func (c *Client) ModifyTTL(ctx context.Context, database, table, ttl string) err
 		"ttl":      ttl,
 	})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost/api/ttl", nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://unix/api/ttl", nil)
 	if err != nil {
 		return err
 	}
 	req.Body = io.NopCloser(strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", c.socketPath)
-		},
-	}
-
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -292,23 +223,17 @@ func (c *Client) ModifyTTL(ctx context.Context, database, table, ttl string) err
 	return nil
 }
 
+// GetHistory retrieves historical metric data from the daemon.
 func (c *Client) GetHistory(metric, period string) ([]rrd.Sample, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/api/history/"+metric+"/"+period, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/history/"+metric+"/"+period, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", c.socketPath)
-		},
-	}
-
-	client := &http.Client{Transport: transport}
+	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
