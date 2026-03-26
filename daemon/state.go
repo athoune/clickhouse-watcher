@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/athoune/clickhouse-watcher/internal/clickhouse"
+	"github.com/athoune/clickhouse-watcher/logger"
 	"github.com/athoune/clickhouse-watcher/rrd"
 )
+
+var stateLog = logger.WithComponent("state")
 
 type State struct {
 	mu        sync.RWMutex
@@ -29,6 +32,13 @@ type State struct {
 }
 
 func NewState(conn clickhouse.Connection, dataDir string) *State {
+	stateLog.Debug().
+		Str("host", conn.Host).
+		Int("port", conn.Port).
+		Str("database", conn.Database).
+		Str("data_dir", dataDir).
+		Msg("Creating new state")
+
 	return &State{
 		conn:    conn,
 		dataDir: dataDir,
@@ -39,8 +49,18 @@ func (s *State) Connect() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	stateLog.Info().
+		Str("host", s.conn.Host).
+		Int("port", s.conn.Port).
+		Msg("Connecting to ClickHouse")
+
 	client, err := clickhouse.NewClient(s.conn)
 	if err != nil {
+		stateLog.Error().
+			Err(err).
+			Str("host", s.conn.Host).
+			Int("port", s.conn.Port).
+			Msg("Failed to connect to ClickHouse")
 		s.lastError = fmt.Sprintf("connection failed: %v", err)
 		s.connected = false
 		return err
@@ -50,6 +70,11 @@ func (s *State) Connect() error {
 	s.connected = true
 	s.lastError = ""
 
+	stateLog.Info().
+		Str("host", s.conn.Host).
+		Int("port", s.conn.Port).
+		Msg("Connected to ClickHouse successfully")
+
 	if s.dataDir != "" {
 		s.initRRD()
 	}
@@ -58,17 +83,41 @@ func (s *State) Connect() error {
 }
 
 func (s *State) initRRD() {
-	os.MkdirAll(s.dataDir, 0755)
+	stateLog.Info().Str("data_dir", s.dataDir).Msg("Initializing RRD storage")
 
-	s.rrdTotalBytes, _ = rrd.New(filepath.Join(s.dataDir, "total_bytes.rrd"))
-	s.rrdTotalRows, _ = rrd.New(filepath.Join(s.dataDir, "total_rows.rrd"))
-	s.rrdUptime, _ = rrd.New(filepath.Join(s.dataDir, "uptime.rrd"))
+	if err := os.MkdirAll(s.dataDir, 0755); err != nil {
+		stateLog.Error().Err(err).Str("data_dir", s.dataDir).Msg("Failed to create data directory")
+		return
+	}
+
+	var err error
+	s.rrdTotalBytes, err = rrd.New(filepath.Join(s.dataDir, "total_bytes.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create total_bytes RRD")
+	}
+
+	s.rrdTotalRows, err = rrd.New(filepath.Join(s.dataDir, "total_rows.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create total_rows RRD")
+	}
+
+	s.rrdUptime, err = rrd.New(filepath.Join(s.dataDir, "uptime.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create uptime RRD")
+	}
+
+	stateLog.Debug().
+		Str("data_dir", s.dataDir).
+		Msg("RRD storage initialized")
 }
 
 func (s *State) StartRRD(ctx context.Context) {
 	if s.rrdTotalBytes == nil {
+		stateLog.Warn().Msg("RRD not initialized, skipping scheduler start")
 		return
 	}
+
+	stateLog.Info().Msg("Starting RRD schedulers")
 
 	collector := func() (int64, error) {
 		s.mu.RLock()
@@ -102,14 +151,20 @@ func (s *State) StartRRD(ctx context.Context) {
 		return int64(m.Uptime.Seconds()), nil
 	}
 	s.rrdUptime.StartScheduler(ctx, collectorUptime)
+
+	stateLog.Info().Msg("RRD schedulers started")
 }
 
 func (s *State) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	stateLog.Info().Msg("Closing state")
+
 	if s.client != nil {
-		s.client.Close()
+		if err := s.client.Close(); err != nil {
+			stateLog.Error().Err(err).Msg("Error closing ClickHouse client")
+		}
 		s.client = nil
 	}
 	s.connected = false
@@ -158,11 +213,14 @@ func (s *State) Poll() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	stateLog.Debug().Msg("Polling ClickHouse metrics")
+
 	metrics, err := client.GetSystemMetrics(ctx)
 	if err != nil {
 		s.mu.Lock()
 		s.lastError = fmt.Sprintf("metrics: %v", err)
 		s.mu.Unlock()
+		stateLog.Error().Err(err).Msg("Failed to poll metrics")
 		return err
 	}
 
@@ -171,6 +229,7 @@ func (s *State) Poll() error {
 		s.mu.Lock()
 		s.lastError = fmt.Sprintf("tables: %v", err)
 		s.mu.Unlock()
+		stateLog.Error().Err(err).Msg("Failed to poll tables")
 		return err
 	}
 
@@ -179,6 +238,7 @@ func (s *State) Poll() error {
 		s.mu.Lock()
 		s.lastError = fmt.Sprintf("queries: %v", err)
 		s.mu.Unlock()
+		stateLog.Error().Err(err).Msg("Failed to poll queries")
 		return err
 	}
 
@@ -188,6 +248,11 @@ func (s *State) Poll() error {
 	s.queries = queries
 	s.lastError = ""
 	s.mu.Unlock()
+
+	stateLog.Debug().
+		Int("tables", len(tables)).
+		Int("queries", len(queries)).
+		Msg("Poll completed successfully")
 
 	return nil
 }
@@ -201,7 +266,20 @@ func (s *State) TruncateTable(ctx context.Context, database, table string) error
 		return fmt.Errorf("not connected")
 	}
 
-	return client.TruncateTable(ctx, database, table)
+	stateLog.Info().
+		Str("database", database).
+		Str("table", table).
+		Msg("Truncating table")
+
+	err := client.TruncateTable(ctx, database, table)
+	if err != nil {
+		stateLog.Error().
+			Err(err).
+			Str("database", database).
+			Str("table", table).
+			Msg("Failed to truncate table")
+	}
+	return err
 }
 
 func (s *State) ModifyTTL(ctx context.Context, database, table, newTTL string) error {
@@ -213,7 +291,22 @@ func (s *State) ModifyTTL(ctx context.Context, database, table, newTTL string) e
 		return fmt.Errorf("not connected")
 	}
 
-	return client.ModifyTTL(ctx, database, table, newTTL)
+	stateLog.Info().
+		Str("database", database).
+		Str("table", table).
+		Str("ttl", newTTL).
+		Msg("Modifying table TTL")
+
+	err := client.ModifyTTL(ctx, database, table, newTTL)
+	if err != nil {
+		stateLog.Error().
+			Err(err).
+			Str("database", database).
+			Str("table", table).
+			Str("ttl", newTTL).
+			Msg("Failed to modify TTL")
+	}
+	return err
 }
 
 func (s *State) ExecuteQuery(ctx context.Context, query string) (*clickhouse.QueryResult, error) {
@@ -225,11 +318,35 @@ func (s *State) ExecuteQuery(ctx context.Context, query string) (*clickhouse.Que
 		return nil, fmt.Errorf("not connected")
 	}
 
-	return client.ExecuteQuery(ctx, query)
+	stateLog.Debug().
+		Str("query", query).
+		Msg("Executing query")
+
+	result, err := client.ExecuteQuery(ctx, query)
+	if err != nil {
+		stateLog.Error().
+			Err(err).
+			Str("query", query).
+			Msg("Query execution failed")
+		return nil, err
+	}
+
+	stateLog.Debug().
+		Str("query", query).
+		Int("rows", len(result.Rows)).
+		Msg("Query executed successfully")
+
+	return result, nil
 }
 
 func (s *State) QueryHistory(metric string, period string) ([]rrd.Sample, error) {
+	stateLog.Debug().
+		Str("metric", metric).
+		Str("period", period).
+		Msg("Querying history")
+
 	if s.rrdTotalBytes == nil {
+		stateLog.Warn().Msg("History not available (no data directory)")
 		return nil, fmt.Errorf("history not available (no data directory)")
 	}
 
@@ -262,6 +379,11 @@ func (s *State) QueryHistory(metric string, period string) ([]rrd.Sample, error)
 			return s.rrdUptime.QueryMonth(), nil
 		}
 	}
+
+	stateLog.Error().
+		Str("metric", metric).
+		Str("period", period).
+		Msg("Unknown metric or period")
 	return nil, fmt.Errorf("unknown metric or period")
 }
 
@@ -280,5 +402,12 @@ func (s *State) GetTruncatableTables(ctx context.Context) ([]clickhouse.Truncata
 		return nil, fmt.Errorf("not connected")
 	}
 
-	return client.GetTruncatableTables(ctx)
+	stateLog.Debug().Msg("Fetching truncatable tables")
+
+	tables, err := client.GetTruncatableTables(ctx)
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to fetch truncatable tables")
+	}
+
+	return tables, err
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/athoune/clickhouse-watcher/client"
 	"github.com/athoune/clickhouse-watcher/internal/clickhouse"
+	"github.com/athoune/clickhouse-watcher/logger"
 	"github.com/athoune/clickhouse-watcher/rrd"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
@@ -34,6 +35,8 @@ var tabNames = []string{"Dashboard", "Tables", "Fat Tables", "Processes", "Histo
 
 var historyMetrics = []string{"total_bytes", "total_rows", "uptime"}
 var historyPeriods = []string{"day", "week", "month"}
+
+var uiLog = logger.WithComponent("ui")
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -220,6 +223,8 @@ type Model struct {
 }
 
 func New(socketPath string) *Model {
+	uiLog.Debug().Str("socket", socketPath).Msg("Creating new UI model")
+
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(clrCyan)
@@ -270,6 +275,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectedMsg:
 		m.loading = false
 		m.connectErr = ""
+		uiLog.Info().Msg("Connected to daemon")
 		return m, tea.Batch(
 			m.cmdFetchMetrics(),
 			m.cmdFetchTables(),
@@ -281,6 +287,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		m.loading = false
 		m.connectErr = msg.err.Error()
+		uiLog.Error().Err(msg.err).Msg("Connection error")
 		return m, nil
 
 	case metricsMsg:
@@ -392,12 +399,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyTab:
 		m.tab = (m.tab + 1) % len(tabNames)
 		m.ttlInput.Blur()
+		uiLog.Debug().Str("tab", tabNames[m.tab]).Msg("Switched tab")
 		return m, nil
 	case tea.KeyEnter:
 		switch m.tab {
 		case tabTables:
+			uiLog.Debug().Int("index", m.tablesTable.Cursor()).Msg("Selected table")
 			return m, m.cmdShowTableDetail(m.tablesTable.Cursor())
 		case tabFatTables:
+			uiLog.Debug().Int("index", m.fatTable.Cursor()).Msg("Selected fat table")
 			return m, m.cmdFatTableSelect()
 		}
 	case tea.KeyLeft:
@@ -424,13 +434,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "r":
+		uiLog.Debug().Str("tab", tabNames[m.tab]).Msg("Manual refresh triggered")
 		return m, m.cmdRefresh()
 	case "t":
 		if m.tab == tabDashboard && m.tableDetail != nil {
+			uiLog.Info().
+				Str("database", m.tableDetail.Database).
+				Str("table", m.tableDetail.Name).
+				Msg("Truncate requested")
 			return m, m.cmdTruncate()
 		}
 	case "l":
 		if m.tab == tabDashboard && m.tableDetail != nil {
+			uiLog.Debug().
+				Str("database", m.tableDetail.Database).
+				Str("table", m.tableDetail.Name).
+				Msg("TTL edit requested")
 			m.ttlInput.Focus()
 			m.refreshDashboard()
 			return m, textinput.Blink

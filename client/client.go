@@ -11,8 +11,11 @@ import (
 	"time"
 
 	"github.com/athoune/clickhouse-watcher/internal/clickhouse"
+	"github.com/athoune/clickhouse-watcher/logger"
 	"github.com/athoune/clickhouse-watcher/rrd"
 )
+
+var clientLog = logger.WithComponent("client")
 
 // Client communicates with the daemon via HTTP over Unix socket.
 type Client struct {
@@ -21,6 +24,7 @@ type Client struct {
 
 // NewClient creates a client that connects to the daemon at the given socket path.
 func NewClient(socketPath string) *Client {
+	clientLog.Debug().Str("socket", socketPath).Msg("Creating new client")
 	return &Client{
 		socketPath: socketPath,
 	}
@@ -35,6 +39,7 @@ func (c *Client) SocketPath() string {
 func (c *Client) unixTransport() *http.Transport {
 	return &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			clientLog.Debug().Str("socket", c.socketPath).Msg("Dialing Unix socket")
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", c.socketPath)
 		},
@@ -43,23 +48,31 @@ func (c *Client) unixTransport() *http.Transport {
 
 // IsConnected checks if the daemon is available and responding.
 func (c *Client) IsConnected(ctx context.Context) (bool, error) {
+	clientLog.Debug().Msg("Checking daemon connection")
+
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/status", nil)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to create status request")
 		return false, err
 	}
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Debug().Err(err).Msg("Daemon connection check failed (daemon may not be running)")
 		return false, nil
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK, nil
+	connected := resp.StatusCode == http.StatusOK
+	clientLog.Debug().Bool("connected", connected).Int("status", resp.StatusCode).Msg("Daemon connection check completed")
+	return connected, nil
 }
 
 // GetMetrics retrieves system metrics from the daemon.
 func (c *Client) GetMetrics(ctx context.Context) (*clickhouse.SystemMetrics, error) {
+	clientLog.Debug().Msg("Fetching metrics")
+
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/metrics", nil)
 	if err != nil {
 		return nil, err
@@ -68,24 +81,30 @@ func (c *Client) GetMetrics(ctx context.Context) (*clickhouse.SystemMetrics, err
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to fetch metrics")
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("Metrics request failed")
 		return nil, fmt.Errorf("status: %d", resp.StatusCode)
 	}
 
 	var result clickhouse.SystemMetrics
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		clientLog.Error().Err(err).Msg("Failed to decode metrics response")
 		return nil, err
 	}
 
+	clientLog.Debug().Str("version", result.Version).Msg("Metrics fetched successfully")
 	return &result, nil
 }
 
 // GetTables retrieves the list of tables from the daemon.
 func (c *Client) GetTables(ctx context.Context) ([]clickhouse.TableMetric, error) {
+	clientLog.Debug().Msg("Fetching tables")
+
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/tables", nil)
 	if err != nil {
 		return nil, err
@@ -94,24 +113,30 @@ func (c *Client) GetTables(ctx context.Context) ([]clickhouse.TableMetric, error
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to fetch tables")
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("Tables request failed")
 		return nil, fmt.Errorf("status: %d", resp.StatusCode)
 	}
 
 	var result []clickhouse.TableMetric
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		clientLog.Error().Err(err).Msg("Failed to decode tables response")
 		return nil, err
 	}
 
+	clientLog.Debug().Int("count", len(result)).Msg("Tables fetched successfully")
 	return result, nil
 }
 
 // GetQueries retrieves currently running queries from the daemon.
 func (c *Client) GetQueries(ctx context.Context) ([]clickhouse.QueryMetric, error) {
+	clientLog.Debug().Msg("Fetching queries")
+
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/queries", nil)
 	if err != nil {
 		return nil, err
@@ -120,24 +145,30 @@ func (c *Client) GetQueries(ctx context.Context) ([]clickhouse.QueryMetric, erro
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to fetch queries")
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("Queries request failed")
 		return nil, fmt.Errorf("status: %d", resp.StatusCode)
 	}
 
 	var result []clickhouse.QueryMetric
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		clientLog.Error().Err(err).Msg("Failed to decode queries response")
 		return nil, err
 	}
 
+	clientLog.Debug().Int("count", len(result)).Msg("Queries fetched successfully")
 	return result, nil
 }
 
 // ExecuteQuery executes a SQL query via the daemon and returns the results.
 func (c *Client) ExecuteQuery(ctx context.Context, query string) (*clickhouse.QueryResult, error) {
+	clientLog.Info().Str("query", query).Msg("Executing query")
+
 	body, _ := json.Marshal(map[string]string{"query": query})
 
 	req, err := http.NewRequestWithContext(ctx, "POST", "http://unix/api/query", nil)
@@ -150,24 +181,33 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*clickhouse.Qu
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to execute query")
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("Query execution failed")
 		return nil, fmt.Errorf("status: %d", resp.StatusCode)
 	}
 
 	var result clickhouse.QueryResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		clientLog.Error().Err(err).Msg("Failed to decode query response")
 		return nil, err
 	}
 
+	clientLog.Debug().Int("rows", len(result.Rows)).Msg("Query executed successfully")
 	return &result, nil
 }
 
 // TruncateTable truncates a table via the daemon.
 func (c *Client) TruncateTable(ctx context.Context, database, table string) error {
+	clientLog.Info().
+		Str("database", database).
+		Str("table", table).
+		Msg("Truncating table")
+
 	body, _ := json.Marshal(map[string]string{
 		"database": database,
 		"table":    table,
@@ -183,19 +223,31 @@ func (c *Client) TruncateTable(ctx context.Context, database, table string) erro
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to truncate table")
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("Truncate request failed")
 		return fmt.Errorf("status: %d", resp.StatusCode)
 	}
 
+	clientLog.Info().
+		Str("database", database).
+		Str("table", table).
+		Msg("Table truncated successfully")
 	return nil
 }
 
 // ModifyTTL modifies or removes the TTL of a table via the daemon.
 func (c *Client) ModifyTTL(ctx context.Context, database, table, ttl string) error {
+	clientLog.Info().
+		Str("database", database).
+		Str("table", table).
+		Str("ttl", ttl).
+		Msg("Modifying TTL")
+
 	body, _ := json.Marshal(map[string]string{
 		"database": database,
 		"table":    table,
@@ -212,19 +264,30 @@ func (c *Client) ModifyTTL(ctx context.Context, database, table, ttl string) err
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to modify TTL")
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("TTL modification failed")
 		return fmt.Errorf("status: %d", resp.StatusCode)
 	}
 
+	clientLog.Info().
+		Str("database", database).
+		Str("table", table).
+		Msg("TTL modified successfully")
 	return nil
 }
 
 // GetHistory retrieves historical metric data from the daemon.
 func (c *Client) GetHistory(metric, period string) ([]rrd.Sample, error) {
+	clientLog.Debug().
+		Str("metric", metric).
+		Str("period", period).
+		Msg("Fetching history")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -236,24 +299,30 @@ func (c *Client) GetHistory(metric, period string) ([]rrd.Sample, error) {
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to fetch history")
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("History request failed")
 		return nil, fmt.Errorf("status: %d", resp.StatusCode)
 	}
 
 	var result []rrd.Sample
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		clientLog.Error().Err(err).Msg("Failed to decode history response")
 		return nil, err
 	}
 
+	clientLog.Debug().Int("samples", len(result)).Msg("History fetched successfully")
 	return result, nil
 }
 
 // GetTruncatableTables retrieves tables with their size and truncatability info.
 func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.TruncatableTable, error) {
+	clientLog.Debug().Msg("Fetching truncatable tables")
+
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/truncatables", nil)
 	if err != nil {
 		return nil, err
@@ -262,18 +331,22 @@ func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.Truncat
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to fetch truncatable tables")
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("Truncatable tables request failed")
 		return nil, fmt.Errorf("status: %d", resp.StatusCode)
 	}
 
 	var result []clickhouse.TruncatableTable
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		clientLog.Error().Err(err).Msg("Failed to decode truncatable tables response")
 		return nil, err
 	}
 
+	clientLog.Debug().Int("count", len(result)).Msg("Truncatable tables fetched successfully")
 	return result, nil
 }
