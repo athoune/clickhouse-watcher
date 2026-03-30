@@ -2,6 +2,7 @@
 package logger
 
 import (
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -10,15 +11,40 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Config holds logging configuration
+type Config struct {
+	Level  string
+	Path   string
+	Pretty bool
+}
+
 // Init initializes the global zerolog configuration.
-// Log level is controlled via the LOG_LEVEL environment variable (debug, info, warn, error).
-// Pretty printing is enabled via LOG_PRETTY=true.
+// Uses environment variables as fallback:
+//
+//	LOG_LEVEL - debug, info, warn, error
+//	LOG_PRETTY - true/false for pretty printing
+//	LOG_PATH - file path or "stdout"/"stderr"
 func Init() {
+	cfg := Config{
+		Level:  os.Getenv("LOG_LEVEL"),
+		Path:   os.Getenv("LOG_PATH"),
+		Pretty: os.Getenv("LOG_PRETTY") == "true",
+	}
+	InitWithConfig(cfg)
+}
+
+// InitWithConfig initializes the logger with explicit configuration.
+// Path can be:
+//   - "" (empty) -> stderr
+//   - "stdout" -> stdout
+//   - "stderr" -> stderr
+//   - file path -> write to file
+func InitWithConfig(cfg Config) {
 	// Configure time format
 	zerolog.TimeFieldFormat = time.RFC3339
 
-	// Set log level from environment
-	level := strings.ToLower(os.Getenv("LOG_LEVEL"))
+	// Set log level
+	level := strings.ToLower(cfg.Level)
 	switch level {
 	case "debug":
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
@@ -32,15 +58,43 @@ func Init() {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	}
 
-	// Configure output format
-	if os.Getenv("LOG_PRETTY") == "true" {
-		log.Logger = log.Output(zerolog.ConsoleWriter{
-			Out:        os.Stderr,
-			TimeFormat: time.RFC3339,
-		})
+	// Determine output writer
+	var output io.Writer
+	switch strings.ToLower(cfg.Path) {
+	case "", "stderr":
+		output = os.Stderr
+	case "stdout":
+		output = os.Stdout
+	default:
+		// Open log file
+		file, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			// Fall back to stderr on error
+			output = os.Stderr
+			log.Error().
+				Err(err).
+				Str("path", cfg.Path).
+				Msg("Failed to open log file, using stderr")
+		} else {
+			output = file
+		}
 	}
 
-	log.Debug().Str("level", level).Msg("Logger initialized")
+	// Configure output format
+	if cfg.Pretty {
+		log.Logger = zerolog.New(zerolog.ConsoleWriter{
+			Out:        output,
+			TimeFormat: time.RFC3339,
+		}).With().Timestamp().Logger()
+	} else {
+		log.Logger = zerolog.New(output).With().Timestamp().Logger()
+	}
+
+	log.Debug().
+		Str("level", level).
+		Str("path", cfg.Path).
+		Bool("pretty", cfg.Pretty).
+		Msg("Logger initialized")
 }
 
 // Logger returns a pre-configured logger instance.

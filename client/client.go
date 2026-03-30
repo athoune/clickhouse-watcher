@@ -350,3 +350,35 @@ func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.Truncat
 	clientLog.Debug().Int("count", len(result)).Msg("Truncatable tables fetched successfully")
 	return result, nil
 }
+
+// GetDiskMetrics retrieves disk usage metrics from the daemon.
+func (c *Client) GetDiskMetrics(ctx context.Context) ([]clickhouse.DiskMetric, error) {
+	clientLog.Debug().Msg("Fetching disk metrics")
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/disks", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Transport: c.unixTransport()}
+	resp, err := client.Do(req)
+	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to fetch disk metrics")
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("Disk metrics request failed")
+		return nil, fmt.Errorf("status: %d", resp.StatusCode)
+	}
+
+	var result []clickhouse.DiskMetric
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		clientLog.Error().Err(err).Msg("Failed to decode disk metrics response")
+		return nil, err
+	}
+
+	clientLog.Debug().Int("count", len(result)).Msg("Disk metrics fetched successfully")
+	return result, nil
+}

@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	Connections map[string]ConnectionConfig `mapstructure:"connections"`
+	Log         LogConfig                   `mapstructure:"log"`
 }
 
 type ConnectionConfig struct {
@@ -20,11 +21,22 @@ type ConnectionConfig struct {
 	Password string `mapstructure:"password"`
 }
 
+type LogConfig struct {
+	Level  string `mapstructure:"level"`
+	Path   string `mapstructure:"path"`
+	Pretty bool   `mapstructure:"pretty"`
+}
+
 func Load() (*Config, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home dir: %w", err)
 	}
+
+	// Set defaults
+	viper.SetDefault("log.level", "info")
+	viper.SetDefault("log.path", "") // Empty means stderr
+	viper.SetDefault("log.pretty", false)
 
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -51,4 +63,16 @@ func (c *Config) GetFirstConnection() *ConnectionConfig {
 		return &conn
 	}
 	return nil
+}
+
+// GetLogConfig returns logging configuration with defaults applied
+func (c *Config) GetLogConfig() LogConfig {
+	cfg := c.Log
+
+	// Apply defaults if not set
+	if cfg.Level == "" {
+		cfg.Level = "info"
+	}
+
+	return cfg
 }

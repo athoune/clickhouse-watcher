@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/athoune/clickhouse-watcher/config"
 	"github.com/athoune/clickhouse-watcher/logger"
 	"github.com/athoune/clickhouse-watcher/ui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,8 +13,20 @@ import (
 const socketPath = "/tmp/clickhouse-watcher.sock"
 
 func main() {
-	// Initialize logger
-	logger.Init()
+	// Load configuration first
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize logger with configuration
+	logCfg := cfg.GetLogConfig()
+	logger.InitWithConfig(logger.Config{
+		Level:  logCfg.Level,
+		Path:   logCfg.Path,
+		Pretty: logCfg.Pretty,
+	})
 	log := logger.WithComponent("client-main")
 
 	log.Info().Str("socket", socketPath).Msg("Starting clickhouse-watch client")

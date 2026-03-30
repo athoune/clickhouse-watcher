@@ -29,18 +29,23 @@ func getDataDir() string {
 }
 
 func main() {
-	// Initialize logger first
-	logger.Init()
-	log := logger.WithComponent("daemon-main")
-
-	log.Info().Msg("Starting clickhouse-watcher daemon")
-
+	// Load configuration first
 	cfg, err := config.Load()
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to load config")
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Initialize logger with configuration
+	logCfg := cfg.GetLogConfig()
+	logger.InitWithConfig(logger.Config{
+		Level:  logCfg.Level,
+		Path:   logCfg.Path,
+		Pretty: logCfg.Pretty,
+	})
+	log := logger.WithComponent("daemon-main")
+
+	log.Info().Msg("Starting clickhouse-watcher daemon")
 
 	var conn clickhouse.Connection
 	if cfgConn := cfg.GetFirstConnection(); cfgConn != nil {

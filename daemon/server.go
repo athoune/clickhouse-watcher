@@ -124,6 +124,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleTruncatables(w, r)
 	case path == "queries":
 		s.handleQueries(w, r)
+	case path == "disks":
+		s.handleDisks(w, r)
 	case strings.HasPrefix(path, "history/"):
 		s.handleHistory(w, r, strings.TrimPrefix(path, "history/"))
 	case path == "query":
@@ -211,6 +213,24 @@ func (s *Server) handleQueries(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(queries)
+}
+
+func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	metrics, err := s.state.GetDiskMetrics(ctx)
+	if err != nil {
+		serverLog.Error().Err(err).Msg("Failed to get disk metrics")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	serverLog.Debug().Int("count", len(metrics)).Msg("Serving disk metrics")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, path string) {

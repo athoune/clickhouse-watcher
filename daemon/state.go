@@ -411,3 +411,22 @@ func (s *State) GetTruncatableTables(ctx context.Context) ([]clickhouse.Truncata
 
 	return tables, err
 }
+
+func (s *State) GetDiskMetrics(ctx context.Context) ([]clickhouse.DiskMetric, error) {
+	s.mu.RLock()
+	client := s.client
+	s.mu.RUnlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	stateLog.Debug().Msg("Fetching disk metrics")
+
+	metrics, err := client.GetDiskMetrics(ctx)
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to fetch disk metrics")
+	}
+
+	return metrics, err
+}

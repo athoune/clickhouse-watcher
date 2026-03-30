@@ -55,7 +55,7 @@ func TestTabCycling(t *testing.T) {
 		t.Fatalf("expected initial tab %d, got %d", tabDashboard, m.tab)
 	}
 
-	for _, want := range []int{tabTables, tabFatTables, tabProcesses, tabHistory, tabDashboard} {
+	for _, want := range []int{tabTables, tabFatTables, tabProcesses, tabDisk, tabHistory, tabDashboard} {
 		m = sendKey(m, tea.KeyTab)
 		if m.tab != want {
 			t.Errorf("after Tab: expected tab %d, got %d", want, m.tab)
