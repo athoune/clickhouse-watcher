@@ -73,6 +73,12 @@ type QueryResult struct {
 	Rows    [][]string
 }
 
+type SystemStats struct {
+	DiskUsagePercent float64
+	CPUUsagePercent  float64
+	MemUsagePercent  float64
+}
+
 type Client struct {
 	conn driver.Conn
 }
@@ -395,6 +401,28 @@ ORDER BY
 		metrics = append(metrics, m)
 	}
 	return metrics, nil
+}
+
+func (c *Client) GetSystemStats(ctx context.Context) (*SystemStats, error) {
+	query := `
+SELECT
+    (SELECT round((100 * sum(CAST(value AS Float64))) / max(CAST(value AS Float64)), 2) 
+     FROM system.asynchronous_metrics 
+     WHERE metric LIKE 'DiskUsed_%') AS disk_usage,
+    (SELECT round(sum(CAST(value AS Float64)) * 100, 2) 
+     FROM system.asynchronous_metrics 
+     WHERE metric IN ('OSUserTimeNormalized', 'OSSystemTimeNormalized', 'OSIrqTimeNormalized', 'OSSoftIrqTimeNormalized')) AS cpu_usage,
+    (SELECT round((CAST(value AS Float64) / (SELECT CAST(value AS Float64) FROM system.asynchronous_metrics WHERE metric = 'MemoryResidentMax') * 100), 2) 
+     FROM system.asynchronous_metrics 
+     WHERE metric = 'MemoryResident') AS mem_usage
+	`
+	row := c.conn.QueryRow(ctx, query)
+	var stats SystemStats
+	err := row.Scan(&stats.DiskUsagePercent, &stats.CPUUsagePercent, &stats.MemUsagePercent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan system stats: %w", err)
+	}
+	return &stats, nil
 }
 
 func (c *Client) Exec(ctx context.Context, query string) error {

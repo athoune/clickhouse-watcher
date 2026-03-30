@@ -126,6 +126,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleQueries(w, r)
 	case path == "disks":
 		s.handleDisks(w, r)
+	case path == "stats":
+		s.handleStats(w, r)
 	case strings.HasPrefix(path, "history/"):
 		s.handleHistory(w, r, strings.TrimPrefix(path, "history/"))
 	case path == "query":
@@ -231,6 +233,24 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(metrics)
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	stats, err := s.state.GetSystemStats(ctx)
+	if err != nil {
+		serverLog.Error().Err(err).Msg("Failed to get system stats")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	serverLog.Debug().Msg("Serving system stats")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, path string) {

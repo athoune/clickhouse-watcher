@@ -22,6 +22,9 @@ import (
 // processRefreshInterval controls how often the Processes tab polls for new data.
 const processRefreshInterval = 10 * time.Second
 
+// statsRefreshInterval controls how often system stats are refreshed.
+const statsRefreshInterval = 10 * time.Second
+
 // tab indices
 const (
 	tabDashboard = 0
@@ -50,6 +53,7 @@ type tablesMsg struct{ tables []clickhouse.TableMetric }
 type truncatablesMsg struct{ tables []clickhouse.TruncatableTable }
 type queriesMsg struct{ queries []clickhouse.QueryMetric }
 type diskMsg struct{ metrics []clickhouse.DiskMetric }
+type systemStatsMsg struct{ stats *clickhouse.SystemStats }
 type historyMsg struct{ samples []rrd.Sample }
 type tableDetailMsg struct{ detail *clickhouse.TableDetail }
 type actionDoneMsg struct{ info string }
@@ -224,6 +228,9 @@ type Model struct {
 
 	// processes auto-refresh
 	procRefreshAt time.Time
+
+	// system stats
+	systemStats *clickhouse.SystemStats
 }
 
 func New(socketPath string) *Model {
@@ -287,6 +294,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cmdFetchQueries(),
 			m.cmdFetchDisks(),
 			m.cmdProcessTick(),
+			m.cmdSystemStatsTick(),
 		)
 
 	case errMsg:
@@ -319,6 +327,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diskMsg:
 		m.diskMetrics = msg.metrics
 		m.rebuildDiskTable()
+		return m, nil
+
+	case systemStatsMsg:
+		m.systemStats = msg.stats
 		return m, nil
 
 	case historyMsg:
@@ -556,6 +568,25 @@ func (m *Model) cmdProcessTick() tea.Cmd {
 	})
 }
 
+// cmdSystemStatsTick schedules the next automatic system stats refresh.
+func (m *Model) cmdSystemStatsTick() tea.Cmd {
+	return tea.Tick(statsRefreshInterval, func(time.Time) tea.Msg {
+		return m.cmdFetchSystemStats()()
+	})
+}
+
+func (m *Model) cmdFetchSystemStats() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		stats, err := m.daemon.GetSystemStats(ctx)
+		if err != nil {
+			return errMsg{err}
+		}
+		return systemStatsMsg{stats}
+	}
+}
+
 func (m *Model) cmdFetchHistory() tea.Cmd {
 	metric := historyMetrics[m.histMetricIdx]
 	period := historyPeriods[m.histPeriodIdx]
@@ -670,8 +701,8 @@ func (m *Model) resizePanes() {
 
 // contentHeight returns the usable lines between the tab bar and the help bar.
 func (m *Model) contentHeight() int {
-	// 1 tab bar + 1 help bar
-	h := m.height - 2
+	// 1 tab bar + 1 stats bar + 1 help bar
+	h := m.height - 3
 	if h < 1 {
 		return 1
 	}
@@ -835,6 +866,7 @@ func (m *Model) View() string {
 	}
 	return m.renderTabBar() + "\n" +
 		m.renderContent() + "\n" +
+		m.renderStatsBar() + "\n" +
 		m.renderHelpBar()
 }
 
@@ -866,6 +898,72 @@ func (m *Model) renderTabBar() string {
 	}
 	// pad the remainder of the bar with the surface colour
 	return chromeBarStyle.Width(m.width).Render(tabs.String())
+}
+
+// renderStatsBar renders a line with three gauges: Disk, CPU, and Memory usage.
+func (m *Model) renderStatsBar() string {
+	if m.systemStats == nil {
+		return chromeBarStyle.Width(m.width).Render("")
+	}
+
+	// Helper to render a gauge
+	renderGauge := func(label string, percent float64, color lipgloss.Color) string {
+		if percent < 0 {
+			percent = 0
+		}
+		if percent > 100 {
+			percent = 100
+		}
+
+		// Calculate filled width (max 20 chars for the bar)
+		barWidth := 20
+		filled := int(percent / 100.0 * float64(barWidth))
+		if filled > barWidth {
+			filled = barWidth
+		}
+		empty := barWidth - filled
+
+		// Choose color based on percentage
+		var barColor lipgloss.Color
+		switch {
+		case percent >= 80:
+			barColor = clrRed
+		case percent >= 50:
+			barColor = clrYellow
+		default:
+			barColor = clrGreen
+		}
+
+		// Build the bar
+		filledBar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("█", filled))
+		emptyBar := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("░", empty))
+		bar := filledBar + emptyBar
+
+		// Build the full gauge: Label + bar + percentage
+		labelStyled := lipgloss.NewStyle().Foreground(clrText).Bold(true).Render(fmt.Sprintf("%-8s", label))
+		percentStyled := lipgloss.NewStyle().Foreground(clrText).Render(fmt.Sprintf(" %5.1f%%", percent))
+
+		return labelStyled + " " + bar + percentStyled
+	}
+
+	// Render three gauges side by side
+	diskGauge := renderGauge("Disk", m.systemStats.DiskUsagePercent, clrGreen)
+	cpuGauge := renderGauge("CPU", m.systemStats.CPUUsagePercent, clrCyan)
+	memGauge := renderGauge("Memory", m.systemStats.MemUsagePercent, clrBlue)
+
+	// Combine them with spacing
+	gauges := diskGauge + "  " + cpuGauge + "  " + memGauge
+
+	// Center the gauges in the available width
+	gaugesWidth := lipgloss.Width(gauges)
+	padding := (m.width - gaugesWidth) / 2
+	if padding < 0 {
+		padding = 0
+	}
+
+	leftPad := strings.Repeat(" ", padding)
+
+	return chromeBarStyle.Width(m.width).Render(leftPad + gauges)
 }
 
 func (m *Model) renderHelpBar() string {

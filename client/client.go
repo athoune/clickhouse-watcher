@@ -382,3 +382,35 @@ func (c *Client) GetDiskMetrics(ctx context.Context) ([]clickhouse.DiskMetric, e
 	clientLog.Debug().Int("count", len(result)).Msg("Disk metrics fetched successfully")
 	return result, nil
 }
+
+// GetSystemStats retrieves system stats (CPU, memory, disk usage) from the daemon.
+func (c *Client) GetSystemStats(ctx context.Context) (*clickhouse.SystemStats, error) {
+	clientLog.Debug().Msg("Fetching system stats")
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/stats", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Transport: c.unixTransport()}
+	resp, err := client.Do(req)
+	if err != nil {
+		clientLog.Error().Err(err).Msg("Failed to fetch system stats")
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		clientLog.Error().Int("status", resp.StatusCode).Msg("System stats request failed")
+		return nil, fmt.Errorf("status: %d", resp.StatusCode)
+	}
+
+	var result clickhouse.SystemStats
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		clientLog.Error().Err(err).Msg("Failed to decode system stats response")
+		return nil, err
+	}
+
+	clientLog.Debug().Msg("System stats fetched successfully")
+	return &result, nil
+}

@@ -430,3 +430,22 @@ func (s *State) GetDiskMetrics(ctx context.Context) ([]clickhouse.DiskMetric, er
 
 	return metrics, err
 }
+
+func (s *State) GetSystemStats(ctx context.Context) (*clickhouse.SystemStats, error) {
+	s.mu.RLock()
+	client := s.client
+	s.mu.RUnlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	stateLog.Debug().Msg("Fetching system stats")
+
+	stats, err := client.GetSystemStats(ctx)
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to fetch system stats")
+	}
+
+	return stats, err
+}
