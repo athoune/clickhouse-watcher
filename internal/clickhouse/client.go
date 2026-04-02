@@ -57,6 +57,10 @@ type TruncatableTable struct {
 	Table       string
 	Rows        uint64
 	Size        string
+	First       string
+	Last        string
+	Duration    string
+	Age         string
 	Truncatable bool
 }
 
@@ -158,12 +162,13 @@ FROM system.tables
 func (c *Client) GetTableMetrics(ctx context.Context, limit int) ([]TableMetric, error) {
 	query := fmt.Sprintf(`
 		SELECT
-			"table",
-			database,
+			concat(database, '.', "table") AS db,
 			formatReadableSize(sum(bytes)) AS size,
 			sum(bytes) AS sort_by_size,
-			min(min_date) AS min_date,
-			max(max_date) AS max_date
+			toString(min(min_date)) AS first,
+			toString(max(max_date)) AS last,
+			toString(max(max_date) - min(min_date)) AS duration,
+			toString(date(now()) - max(max_date)) AS age
 		FROM system.parts
 		WHERE active
 		GROUP BY
@@ -273,6 +278,10 @@ SELECT
     "table",
     size,
     rows,
+    first,
+    last,
+    duration,
+    age,
     like(comment, '%It is safe to truncate or drop this table at any time.') AS truncatable
 FROM system.tables AS t
 INNER JOIN
@@ -282,7 +291,11 @@ INNER JOIN
         database,
         formatReadableSize(sum(bytes)) AS size,
         sum(bytes) AS bytes_raw,
-        sum(rows) AS rows
+        sum(rows) AS rows,
+        toString(min(min_date)) AS first,
+        toString(max(max_date)) AS last,
+        toString(max(max_date) - min(min_date)) AS duration,
+        toString(date(now()) - max(max_date)) AS age
     FROM system.parts
     WHERE active
     GROUP BY
@@ -295,16 +308,16 @@ ORDER BY p.bytes_raw DESC
 	`
 	rows, err := c.conn.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query processes: %w", err)
+		return nil, fmt.Errorf("failed to query fat tables: %w", err)
 	}
 	defer rows.Close()
 
 	var tables []TruncatableTable
 	for rows.Next() {
 		var line TruncatableTable
-		err = rows.Scan(&line.Database, &line.Table, &line.Size, &line.Rows, &line.Truncatable)
+		err = rows.Scan(&line.Database, &line.Table, &line.Size, &line.Rows, &line.First, &line.Last, &line.Duration, &line.Age, &line.Truncatable)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan query response: %w", err)
+			return nil, fmt.Errorf("failed to scan fat table: %w", err)
 		}
 		tables = append(tables, line)
 	}

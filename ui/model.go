@@ -752,10 +752,14 @@ func (m *Model) rebuildTablesTable() {
 
 func (m *Model) rebuildFatTable() {
 	w := m.tableWidth()
-	dbW := w / 5
-	nameW := w / 4
-	sizeW := 12
+	dbW := w / 8
+	nameW := w / 6
+	sizeW := 10
 	rowsW := 12
+	firstW := 12
+	lastW := 12
+	durationW := 10
+	ageW := 8
 	truncW := 11
 	h := m.contentHeight() - 2
 	if h < 1 {
@@ -770,7 +774,9 @@ func (m *Model) rebuildFatTable() {
 		}
 		rows = append(rows, table.Row{
 			t.Database, t.Table, t.Size,
-			humanize.Comma(int64(t.Rows)), flag,
+			humanize.Comma(int64(t.Rows)),
+			t.First, t.Last, t.Duration, t.Age,
+			flag,
 		})
 	}
 	if cur >= len(rows) {
@@ -782,6 +788,10 @@ func (m *Model) rebuildFatTable() {
 			{Title: "Table", Width: nameW},
 			{Title: "Size", Width: sizeW},
 			{Title: "Rows", Width: rowsW},
+			{Title: "First", Width: firstW},
+			{Title: "Last", Width: lastW},
+			{Title: "Duration", Width: durationW},
+			{Title: "Age", Width: ageW},
 			{Title: "Truncatable", Width: truncW},
 		}),
 		table.WithRows(rows),

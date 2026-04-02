@@ -183,8 +183,8 @@ func TestTruncatablesMsgPopulatesFatTable(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 fat-table row, got %d", len(rows))
 	}
-	if rows[0][4] != "yes" {
-		t.Errorf("truncatable flag should be 'yes', got %q", rows[0][4])
+	if rows[0][8] != "yes" {
+		t.Errorf("truncatable flag should be 'yes', got %q", rows[0][8])
 	}
 }
 
