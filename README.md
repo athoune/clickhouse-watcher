@@ -5,18 +5,18 @@ A TUI application for monitoring ClickHouse databases with metrics persistence u
 ## Architecture
 
 ```
-┌──────────────────┐     ┌──────────────────┐
-│ clickhouse-watch │────▶│ clickhouse-watcherd│
-│    (TUI Client) │     │     (Daemon)      │
-└──────────────────┘     └────────┬─────────┘
+┌──────────────────┐     ┌─────────────────────┐
+│ clickhouse-watch │────▶│ clickhouse-watcherd │
+│    (TUI Client)  │     │     (Daemon)        │
+└──────────────────┘     └────────┬────────────┘
                                   │
                          REST API (HTTP over Unix Socket)
                                   │
                          ┌────────┴─────────┐
                          │                  │
-                   ┌─────▼─────┐    ┌──────▼───────┐
-                   │ ClickHouse │    │ RRD Persistence│
-                   └───────────┘    └───────────────┘
+                   ┌─────▼──────┐    ┌──────▼──────────┐
+                   │ ClickHouse │    │ RRD Persistence │
+                   └────────────┘    └─────────────────┘
 ```
 
 - **clickhouse-watcherd**: Daemon that connects to ClickHouse, polls metrics, serves REST API
@@ -125,9 +125,6 @@ connections:
 #### History
 - Historical metrics (total_bytes, total_rows, uptime)
 - `←/→` - Change period (day/week/month)
-
-#### Query Executor
-- Type SQL queries and press `Enter` to execute
 
 ## Configuration
 
