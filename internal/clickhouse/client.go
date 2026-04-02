@@ -406,15 +406,28 @@ ORDER BY
 func (c *Client) GetSystemStats(ctx context.Context) (*SystemStats, error) {
 	query := `
 SELECT
-    (SELECT round((100 * sum(CAST(value AS Float64))) / max(CAST(value AS Float64)), 2) 
-     FROM system.asynchronous_metrics 
-     WHERE metric LIKE 'DiskUsed_%') AS disk_usage,
-    (SELECT round(sum(CAST(value AS Float64)) * 100, 2) 
-     FROM system.asynchronous_metrics 
-     WHERE metric IN ('OSUserTimeNormalized', 'OSSystemTimeNormalized', 'OSIrqTimeNormalized', 'OSSoftIrqTimeNormalized')) AS cpu_usage,
-    (SELECT round((CAST(value AS Float64) / (SELECT CAST(value AS Float64) FROM system.asynchronous_metrics WHERE metric = 'MemoryResidentMax') * 100), 2) 
-     FROM system.asynchronous_metrics 
-     WHERE metric = 'MemoryResident') AS mem_usage
+	(
+	SELECT
+ 		round(100 * maxIf(value, metric = 'DiskUsed_default') / maxIf(value, metric = 'DiskTotal_default'), 2) AS ratio
+	FROM system.asynchronous_metrics
+	WHERE metric IN ('DiskUsed_default', 'DiskTotal_default')
+	) AS disk_usage,
+	(
+	SELECT round(sum(CAST(value AS Float64)) * 100, 2)
+	FROM system.asynchronous_metrics
+	WHERE metric IN (
+	 	'OSUserTimeNormalized',
+	 	'OSSystemTimeNormalized',
+		'OSIrqTimeNormalized',
+		'OSSoftIrqTimeNormalized')
+	) AS cpu_usage,
+	(
+	SELECT round((CAST(value AS Float64) / (SELECT CAST(value AS Float64)
+	FROM system.asynchronous_metrics
+	WHERE metric = 'MemoryResidentMax') * 100), 2
+	)
+FROM system.asynchronous_metrics
+WHERE metric = 'MemoryResident') AS mem_usage
 	`
 	row := c.conn.QueryRow(ctx, query)
 	var stats SystemStats
