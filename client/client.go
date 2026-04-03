@@ -13,6 +13,7 @@ import (
 	"github.com/athoune/clickhouse-watcher/internal/clickhouse"
 	"github.com/athoune/clickhouse-watcher/logger"
 	"github.com/athoune/clickhouse-watcher/rrd"
+	"github.com/athoune/clickhouse-watcher/version"
 )
 
 var clientLog = logger.WithComponent("client")
@@ -46,6 +47,11 @@ func (c *Client) unixTransport() *http.Transport {
 	}
 }
 
+// addVersionHeader adds the client version header to the request.
+func addVersionHeader(req *http.Request) {
+	req.Header.Set("X-Client-Version", version.Version())
+}
+
 // IsConnected checks if the daemon is available and responding.
 func (c *Client) IsConnected(ctx context.Context) (bool, error) {
 	clientLog.Debug().Msg("Checking daemon connection")
@@ -55,6 +61,7 @@ func (c *Client) IsConnected(ctx context.Context) (bool, error) {
 		clientLog.Error().Err(err).Msg("Failed to create status request")
 		return false, err
 	}
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -69,6 +76,20 @@ func (c *Client) IsConnected(ctx context.Context) (bool, error) {
 	return connected, nil
 }
 
+// checkVersionError checks if the response is a version mismatch error and returns it.
+func checkVersionError(resp *http.Response) error {
+	if resp.StatusCode == http.StatusConflict {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			return fmt.Errorf("version mismatch: please ensure client and server are the same version")
+		}
+		return fmt.Errorf("%s", errResp.Error)
+	}
+	return nil
+}
+
 // GetMetrics retrieves system metrics from the daemon.
 func (c *Client) GetMetrics(ctx context.Context) (*clickhouse.SystemMetrics, error) {
 	clientLog.Debug().Msg("Fetching metrics")
@@ -77,6 +98,7 @@ func (c *Client) GetMetrics(ctx context.Context) (*clickhouse.SystemMetrics, err
 	if err != nil {
 		return nil, err
 	}
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -85,6 +107,11 @@ func (c *Client) GetMetrics(ctx context.Context) (*clickhouse.SystemMetrics, err
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("Metrics request failed")
@@ -109,6 +136,7 @@ func (c *Client) GetTables(ctx context.Context) ([]clickhouse.TableMetric, error
 	if err != nil {
 		return nil, err
 	}
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -117,6 +145,11 @@ func (c *Client) GetTables(ctx context.Context) ([]clickhouse.TableMetric, error
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("Tables request failed")
@@ -141,6 +174,7 @@ func (c *Client) GetQueries(ctx context.Context) ([]clickhouse.QueryMetric, erro
 	if err != nil {
 		return nil, err
 	}
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -149,6 +183,11 @@ func (c *Client) GetQueries(ctx context.Context) ([]clickhouse.QueryMetric, erro
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("Queries request failed")
@@ -177,6 +216,7 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*clickhouse.Qu
 	}
 	req.Body = io.NopCloser(strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -185,6 +225,11 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*clickhouse.Qu
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("Query execution failed")
@@ -219,6 +264,7 @@ func (c *Client) TruncateTable(ctx context.Context, database, table string) erro
 	}
 	req.Body = io.NopCloser(strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -227,6 +273,11 @@ func (c *Client) TruncateTable(ctx context.Context, database, table string) erro
 		return err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("Truncate request failed")
@@ -260,6 +311,7 @@ func (c *Client) ModifyTTL(ctx context.Context, database, table, ttl string) err
 	}
 	req.Body = io.NopCloser(strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -268,6 +320,11 @@ func (c *Client) ModifyTTL(ctx context.Context, database, table, ttl string) err
 		return err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("TTL modification failed")
@@ -295,6 +352,7 @@ func (c *Client) GetHistory(metric, period string) ([]rrd.Sample, error) {
 	if err != nil {
 		return nil, err
 	}
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -303,6 +361,11 @@ func (c *Client) GetHistory(metric, period string) ([]rrd.Sample, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("History request failed")
@@ -327,6 +390,7 @@ func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.Truncat
 	if err != nil {
 		return nil, err
 	}
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -335,6 +399,11 @@ func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.Truncat
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("Truncatable tables request failed")
@@ -359,6 +428,7 @@ func (c *Client) GetDiskMetrics(ctx context.Context) ([]clickhouse.DiskMetric, e
 	if err != nil {
 		return nil, err
 	}
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -367,6 +437,11 @@ func (c *Client) GetDiskMetrics(ctx context.Context) ([]clickhouse.DiskMetric, e
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("Disk metrics request failed")
@@ -391,6 +466,7 @@ func (c *Client) GetSystemStats(ctx context.Context) (*clickhouse.SystemStats, e
 	if err != nil {
 		return nil, err
 	}
+	addVersionHeader(req)
 
 	client := &http.Client{Transport: c.unixTransport()}
 	resp, err := client.Do(req)
@@ -399,6 +475,11 @@ func (c *Client) GetSystemStats(ctx context.Context) (*clickhouse.SystemStats, e
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if err := checkVersionError(resp); err != nil {
+		clientLog.Error().Err(err).Msg("Version mismatch")
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		clientLog.Error().Int("status", resp.StatusCode).Msg("System stats request failed")

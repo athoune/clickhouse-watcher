@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/athoune/clickhouse-watcher/logger"
+	"github.com/athoune/clickhouse-watcher/version"
 )
 
 var serverLog = logger.WithComponent("server")
@@ -112,6 +113,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Str("path", path).
 		Str("remote", r.RemoteAddr).
 		Msg("Request received")
+
+	// Check client version
+	clientVersion := r.Header.Get("X-Client-Version")
+	serverVersion := version.Version()
+
+	if clientVersion != "" && clientVersion != serverVersion {
+		serverLog.Error().
+			Str("client_version", clientVersion).
+			Str("server_version", serverVersion).
+			Str("remote", r.RemoteAddr).
+			Msg("Version mismatch - client and server versions must match")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Version mismatch: client=%s, server=%s. Please ensure both client and server are the same version.", clientVersion, serverVersion),
+		})
+		return
+	}
 
 	switch {
 	case path == "status":
