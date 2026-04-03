@@ -55,7 +55,7 @@ func TestTabCycling(t *testing.T) {
 		t.Fatalf("expected initial tab %d, got %d", tabDashboard, m.tab)
 	}
 
-	for _, want := range []int{tabTables, tabFatTables, tabProcesses, tabDisk, tabHistory, tabDashboard} {
+	for _, want := range []int{tabFatTables, tabProcesses, tabDisk, tabHistory, tabDashboard} {
 		m = sendKey(m, tea.KeyTab)
 		if m.tab != want {
 			t.Errorf("after Tab: expected tab %d, got %d", want, m.tab)
@@ -141,30 +141,6 @@ func TestMetricsMsgUpdatesViewport(t *testing.T) {
 	content := um.dashViewport.View()
 	if content == "" {
 		t.Error("dashboard viewport should not be empty after metrics are set")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// tablesMsg populates the tables table
-// ---------------------------------------------------------------------------
-
-func TestTablesMsgPopulatesTable(t *testing.T) {
-	m := newTestModel()
-	tables := []clickhouse.TableMetric{
-		{Database: "db1", Name: "events", Size: "1.2 GB", SizeBytes: 1200000000},
-		{Database: "db1", Name: "metrics", Size: "500 MB", SizeBytes: 500000000},
-	}
-	updated, _ := m.Update(tablesMsg{tables})
-	um := updated.(*Model)
-	if len(um.tables) != 2 {
-		t.Errorf("expected 2 tables, got %d", len(um.tables))
-	}
-	rows := um.tablesTable.Rows()
-	if len(rows) != 2 {
-		t.Errorf("tablesTable should have 2 rows, got %d", len(rows))
-	}
-	if rows[0][0] != "events" {
-		t.Errorf("first row Table should be 'events', got %q", rows[0][0])
 	}
 }
 

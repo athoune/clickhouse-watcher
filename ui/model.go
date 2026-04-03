@@ -28,14 +28,13 @@ const statsRefreshInterval = 10 * time.Second
 // tab indices
 const (
 	tabDashboard = 0
-	tabTables    = 1
-	tabFatTables = 2
-	tabProcesses = 3
-	tabDisk      = 4
-	tabHistory   = 5
+	tabFatTables = 1
+	tabProcesses = 2
+	tabDisk      = 3
+	tabHistory   = 4
 )
 
-var tabNames = []string{"Dashboard", "Tables", "Fat Tables", "Processes", "Disk", "History"}
+var tabNames = []string{"Dashboard", "Fat Tables", "Processes", "Disk", "History"}
 
 var historyMetrics = []string{"total_bytes", "total_rows", "disk_usage", "cpu_usage", "memory_usage", "ingestion", "users", "errors"}
 var historyPeriods = []string{"day", "week", "month"}
@@ -49,7 +48,6 @@ var uiLog = logger.WithComponent("ui")
 type connectedMsg struct{}
 type errMsg struct{ err error }
 type metricsMsg struct{ metrics *clickhouse.SystemMetrics }
-type tablesMsg struct{ tables []clickhouse.TableMetric }
 type truncatablesMsg struct{ tables []clickhouse.TruncatableTable }
 type queriesMsg struct{ queries []clickhouse.QueryMetric }
 type diskMsg struct{ metrics []clickhouse.DiskMetric }
@@ -203,7 +201,6 @@ type Model struct {
 
 	// cached data
 	metrics      *clickhouse.SystemMetrics
-	tables       []clickhouse.TableMetric
 	truncatables []clickhouse.TruncatableTable
 	queries      []clickhouse.QueryMetric
 	diskMetrics  []clickhouse.DiskMetric
@@ -211,7 +208,6 @@ type Model struct {
 
 	// pane components
 	dashViewport viewport.Model
-	tablesTable  table.Model
 	fatTable     table.Model
 	procViewport viewport.Model
 	diskTable    table.Model
@@ -289,7 +285,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		uiLog.Info().Msg("Connected to daemon")
 		return m, tea.Batch(
 			m.cmdFetchMetrics(),
-			m.cmdFetchTables(),
 			m.cmdFetchTruncatables(),
 			m.cmdFetchQueries(),
 			m.cmdFetchDisks(),
@@ -306,11 +301,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case metricsMsg:
 		m.metrics = msg.metrics
 		m.refreshDashboard()
-		return m, nil
-
-	case tablesMsg:
-		m.tables = msg.tables
-		m.rebuildTablesTable()
 		return m, nil
 
 	case truncatablesMsg:
@@ -373,9 +363,6 @@ func (m *Model) updateFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.dashViewport, cmd = m.dashViewport.Update(msg)
 		return m, cmd
-	case tabTables:
-		m.tablesTable, cmd = m.tablesTable.Update(msg)
-		return m, cmd
 	case tabFatTables:
 		m.fatTable, cmd = m.fatTable.Update(msg)
 		return m, cmd
@@ -432,9 +419,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyEnter:
 		switch m.tab {
-		case tabTables:
-			uiLog.Debug().Int("index", m.tablesTable.Cursor()).Msg("Selected table")
-			return m, m.cmdShowTableDetail(m.tablesTable.Cursor())
 		case tabFatTables:
 			uiLog.Debug().Int("index", m.fatTable.Cursor()).Msg("Selected fat table")
 			return m, m.cmdFatTableSelect()
@@ -517,18 +501,6 @@ func (m *Model) cmdFetchMetrics() tea.Cmd {
 	}
 }
 
-func (m *Model) cmdFetchTables() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		tables, err := m.daemon.GetTables(ctx)
-		if err != nil {
-			return errMsg{err}
-		}
-		return tablesMsg{tables}
-	}
-}
-
 func (m *Model) cmdFetchTruncatables() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -607,10 +579,8 @@ func (m *Model) cmdRefresh() tea.Cmd {
 	switch m.tab {
 	case tabDashboard:
 		return m.cmdFetchMetrics()
-	case tabTables:
-		return tea.Batch(m.cmdFetchTables(), m.cmdFetchTruncatables())
 	case tabFatTables:
-		return tea.Batch(m.cmdFetchTables(), m.cmdFetchTruncatables())
+		return m.cmdFetchTruncatables()
 	case tabProcesses:
 		return m.cmdFetchQueries()
 	case tabDisk:
@@ -619,19 +589,6 @@ func (m *Model) cmdRefresh() tea.Cmd {
 		return m.cmdFetchHistory()
 	}
 	return nil
-}
-
-func (m *Model) cmdShowTableDetail(idx int) tea.Cmd {
-	if idx < 0 || idx >= len(m.tables) {
-		return nil
-	}
-	t := m.tables[idx]
-	return func() tea.Msg {
-		return tableDetailMsg{&clickhouse.TableDetail{
-			Database: t.Database,
-			Name:     t.Name,
-		}}
-	}
 }
 
 func (m *Model) cmdFatTableSelect() tea.Cmd {
@@ -698,7 +655,6 @@ func (m *Model) resizePanes() {
 	m.histViewport.Width = w
 	m.histViewport.Height = h
 
-	m.rebuildTablesTable()
 	m.rebuildFatTable()
 	m.rebuildDiskTable()
 }
@@ -718,40 +674,6 @@ func (m *Model) tableWidth() int {
 		return 80
 	}
 	return m.width
-}
-
-func (m *Model) rebuildTablesTable() {
-	w := m.tableWidth()
-	nameW := w / 4
-	dbW := w / 5
-	sizeW := 12
-	dateW := 12
-	h := m.contentHeight() - 2
-	if h < 1 {
-		h = 1
-	}
-	cur := m.tablesTable.Cursor()
-	rows := make([]table.Row, 0, len(m.tables))
-	for _, t := range m.tables {
-		rows = append(rows, table.Row{t.Name, t.Database, t.Size, t.MinDate, t.MaxDate})
-	}
-	if cur >= len(rows) {
-		cur = 0
-	}
-	m.tablesTable = table.New(
-		table.WithColumns([]table.Column{
-			{Title: "Table", Width: nameW},
-			{Title: "Database", Width: dbW},
-			{Title: "Size", Width: sizeW},
-			{Title: "Min Date", Width: dateW},
-			{Title: "Max Date", Width: dateW},
-		}),
-		table.WithRows(rows),
-		table.WithFocused(true),
-		table.WithHeight(h),
-	)
-	m.tablesTable.SetStyles(tblStyle)
-	m.tablesTable.SetCursor(cur)
 }
 
 func (m *Model) rebuildFatTable() {
@@ -993,8 +915,6 @@ func (m *Model) renderHelpBar() string {
 		} else {
 			keys = []string{"r:refresh", "Tab:next"}
 		}
-	case tabTables:
-		keys = []string{"↑↓:select", "Enter:detail", "r:refresh", "Tab:next"}
 	case tabFatTables:
 		keys = []string{"↑↓:select", "Enter:detail", "r:refresh", "Tab:next"}
 	case tabProcesses:
@@ -1045,8 +965,6 @@ func (m *Model) renderContent() string {
 	switch m.tab {
 	case tabDashboard:
 		return m.dashViewport.View()
-	case tabTables:
-		return m.tablesTable.View()
 	case tabFatTables:
 		return m.fatTable.View()
 	case tabProcesses:
