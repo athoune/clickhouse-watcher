@@ -540,7 +540,7 @@ func TestFormatHistoryValue(t *testing.T) {
 		{"total_bytes", 1024, humanize.Bytes(1024)}, // "1.0 kB"
 		{"total_rows", 1_000_000, "1,000,000 rows"},
 		{"total_rows", 42, "42 rows"},
-		{"uptime", 3600, "1h0m0s"},
+		{"disk_usage", 75, "75%"},
 		{"unknown", 99, humanize.Comma(99)},       // "99"
 		{"unknown", 1_000, humanize.Comma(1_000)}, // "1,000"
 	}

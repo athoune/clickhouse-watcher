@@ -30,11 +30,12 @@ func TestRingPushAndRead(t *testing.T) {
 		t.Errorf("Expected 3 samples, got %d", len(samples))
 	}
 
-	if samples[0].Value != 100 {
-		t.Errorf("Expected first value 100, got %d", samples[0].Value)
+	// Les échantillons sont maintenant du plus récent au plus ancien
+	if samples[0].Value != 300 {
+		t.Errorf("Expected first (most recent) value 300, got %d", samples[0].Value)
 	}
-	if samples[2].Value != 300 {
-		t.Errorf("Expected third value 300, got %d", samples[2].Value)
+	if samples[2].Value != 100 {
+		t.Errorf("Expected last (oldest) value 100, got %d", samples[2].Value)
 	}
 }
 
@@ -52,9 +53,10 @@ func TestRingWrapAround(t *testing.T) {
 		t.Errorf("Expected %d samples (ring full), got %d", size, len(samples))
 	}
 
-	last := samples[len(samples)-1]
-	if last.Value != 5 {
-		t.Errorf("Expected last value 5, got %d", last.Value)
+	// Les échantillons sont maintenant du plus récent au plus ancien
+	first := samples[0]
+	if first.Value != 5 {
+		t.Errorf("Expected first (most recent) value 5, got %d", first.Value)
 	}
 }
 
@@ -70,8 +72,9 @@ func TestRecordBasic(t *testing.T) {
 		t.Errorf("Expected 3 day samples, got %d", len(day))
 	}
 
-	if day[0].Value != 1000 {
-		t.Errorf("Expected first value 1000, got %d", day[0].Value)
+	// Les échantillons sont maintenant du plus récent au plus ancien
+	if day[0].Value != 3000 {
+		t.Errorf("Expected first (most recent) value 3000, got %d", day[0].Value)
 	}
 }
 
@@ -194,8 +197,9 @@ func TestPersistence(t *testing.T) {
 		t.Errorf("Expected 10 samples after reload, got %d", len(day2))
 	}
 
-	if day2[0].Value != 0 {
-		t.Errorf("Expected first value 0, got %d", day2[0].Value)
+	// Les échantillons sont maintenant du plus récent au plus ancien
+	if day2[0].Value != 900 {
+		t.Errorf("Expected first (most recent) value 900, got %d", day2[0].Value)
 	}
 }
 

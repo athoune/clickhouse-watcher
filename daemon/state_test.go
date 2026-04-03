@@ -92,15 +92,10 @@ func stateWithRRDs(t *testing.T) *State {
 	if err != nil {
 		t.Fatalf("rrd.New failed: %v", err)
 	}
-	s.rrdUptime, err = rrd.New("")
-	if err != nil {
-		t.Fatalf("rrd.New failed: %v", err)
-	}
 
 	// Push a sample into each RRD so QueryDay returns non-empty slices.
 	_ = s.rrdTotalBytes.Record(4096)
 	_ = s.rrdTotalRows.Record(100)
-	_ = s.rrdUptime.Record(3600)
 	return s
 }
 
@@ -118,15 +113,6 @@ func TestQueryHistoryTotalBytesDay(t *testing.T) {
 func TestQueryHistoryTotalRowsWeek(t *testing.T) {
 	s := stateWithRRDs(t)
 	samples, err := s.QueryHistory("total_rows", "week")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	_ = samples
-}
-
-func TestQueryHistoryUptimeMonth(t *testing.T) {
-	s := stateWithRRDs(t)
-	samples, err := s.QueryHistory("uptime", "month")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

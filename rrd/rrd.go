@@ -50,10 +50,11 @@ type Sample struct {
 	Value int64
 }
 
-// ReadAll retourne les échantillons du plus ancien au plus récent.
+// ReadAll retourne les échantillons du plus récent au plus ancien.
 func (r *Ring) ReadAll() []Sample {
 	out := make([]Sample, 0, r.size)
-	for i := 0; i < r.size; i++ {
+	// Parcourir en sens inverse pour avoir le plus récent en premier
+	for i := r.size - 1; i >= 0; i-- {
 		idx := (r.head + i) % r.size
 		if r.timestamps[idx] == nil {
 			continue

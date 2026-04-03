@@ -27,7 +27,6 @@ type State struct {
 
 	rrdTotalBytes *rrd.RRD
 	rrdTotalRows  *rrd.RRD
-	rrdUptime     *rrd.RRD
 	rrdDiskUsage  *rrd.RRD
 	rrdCPUUsage   *rrd.RRD
 	rrdMemUsage   *rrd.RRD
@@ -107,11 +106,6 @@ func (s *State) initRRD() {
 		stateLog.Error().Err(err).Msg("Failed to create total_rows RRD")
 	}
 
-	s.rrdUptime, err = rrd.New(filepath.Join(s.dataDir, "uptime.rrd"))
-	if err != nil {
-		stateLog.Error().Err(err).Msg("Failed to create uptime RRD")
-	}
-
 	s.rrdDiskUsage, err = rrd.New(filepath.Join(s.dataDir, "disk_usage.rrd"))
 	if err != nil {
 		stateLog.Error().Err(err).Msg("Failed to create disk_usage RRD")
@@ -176,17 +170,6 @@ func (s *State) StartRRD(ctx context.Context) {
 		return int64(m.TotalRows), nil
 	}
 	s.rrdTotalRows.StartScheduler(ctx, collectorRows)
-
-	collectorUptime := func() (int64, error) {
-		s.mu.RLock()
-		m := s.metrics
-		s.mu.RUnlock()
-		if m == nil {
-			return 0, fmt.Errorf("no metrics")
-		}
-		return int64(m.Uptime.Seconds()), nil
-	}
-	s.rrdUptime.StartScheduler(ctx, collectorUptime)
 
 	// Disk usage collector - using SystemStats
 	collectorDisk := func() (int64, error) {
@@ -500,15 +483,6 @@ func (s *State) QueryHistory(metric string, period string) ([]rrd.Sample, error)
 			return s.rrdTotalRows.QueryWeek(), nil
 		case "month":
 			return s.rrdTotalRows.QueryMonth(), nil
-		}
-	case "uptime":
-		switch period {
-		case "day":
-			return s.rrdUptime.QueryDay(), nil
-		case "week":
-			return s.rrdUptime.QueryWeek(), nil
-		case "month":
-			return s.rrdUptime.QueryMonth(), nil
 		}
 	case "disk_usage":
 		switch period {
