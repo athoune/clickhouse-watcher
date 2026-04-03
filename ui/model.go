@@ -1154,6 +1154,17 @@ func (m *Model) renderHistoryContent() string {
 	}
 
 	barW := 24
+
+	// Build sparkline values array (most recent first)
+	values := make([]int64, len(m.historyData))
+	for i, s := range m.historyData {
+		values[i] = s.Value
+	}
+
+	// Display sparkline chart at the top
+	spark := sparkline(values, maxVal, barW)
+	b.WriteString(mutedStyle.Render("  Trend: ") + spark + "\n\n")
+
 	b.WriteString(mutedStyle.Render(fmt.Sprintf("  %-20s  %-20s  %s\n",
 		"Timestamp", "Value", strings.Repeat("▒", barW))))
 	b.WriteString(mutedStyle.Render("  " + strings.Repeat("─", 20+2+20+2+barW) + "\n"))
@@ -1212,6 +1223,33 @@ func sparkBar(val, maxVal int64, width int) string {
 		style = lipgloss.NewStyle().Foreground(clrGreen)
 	}
 	return style.Render(bar)
+}
+
+// sparkline renders a mini chart using Unicode block characters (▁▂▃▄▅▆▇█).
+// It shows the trend of values over time in a compact form.
+func sparkline(values []int64, maxVal int64, width int) string {
+	if len(values) == 0 || maxVal <= 0 || width <= 0 {
+		return strings.Repeat(" ", width)
+	}
+
+	blocks := []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+	var b strings.Builder
+	for i := 0; i < width && i < len(values); i++ {
+		val := values[i]
+		ratio := float64(val) / float64(maxVal)
+		if ratio < 0 {
+			ratio = 0
+		}
+		if ratio > 1 {
+			ratio = 1
+		}
+		// Map ratio to 0-7 index
+		idx := int(ratio * 7)
+		b.WriteString(blocks[idx])
+	}
+
+	return b.String()
 }
 
 // memBar renders a small memory-usage progress bar.
