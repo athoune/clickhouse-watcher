@@ -39,7 +39,39 @@ This creates two binaries in the `build/` directory:
 - `clickhouse-watcherd` - the daemon
 - `clickhouse-watch` - the TUI client
 
-### Production Installation
+### Quick Start (Default Behavior)
+
+By default, the application works without any system configuration:
+
+```bash
+# 1. Build
+make build
+
+# 2. Create a config.yaml in the current directory (optional)
+cat > config.yaml << 'EOF'
+connections:
+  local:
+    name: "Local ClickHouse"
+    host: "localhost"
+    port: 9000
+    database: "default"
+    username: "default"
+    password: ""
+EOF
+
+# 3. Start the daemon (uses /tmp/clickhouse-watcher.sock and ~/.local/share/clickhouse-watcher/)
+./build/clickhouse-watcherd
+
+# 4. In another terminal, start the client
+./build/clickhouse-watch
+```
+
+**Default paths:**
+- Config: searches in current directory, then `~/.config/clickhouse-watcher/`
+- Data: `~/.local/share/clickhouse-watcher/`
+- Socket: `/tmp/clickhouse-watcher.sock`
+
+### Production Installation (systemd)
 
 For production deployment with systemd, follow these steps:
 
@@ -155,20 +187,11 @@ After installing and starting the daemon, any user in the `clickhouse_watcherd` 
 clickhouse-watch
 ```
 
-### Development/Local Run
-
-For quick testing without systemd:
-
-```bash
-# Start ClickHouse
-make docker-up
-sleep 15
-
-# Run daemon in foreground
-./build/clickhouse-watcherd
-
-# In another terminal, run client
-./build/clickhouse-watch
+Note: The systemd service uses flags to override default paths:
+```
+clickhouse-watcherd -config /etc/clickhouse-watcher/config.yaml \
+                    -socket /run/clickhouse-watcher/clickhouse-watcher.sock \
+                    -data /var/lib/clickhouse-watcher
 ```
 
 ## Makefile Commands

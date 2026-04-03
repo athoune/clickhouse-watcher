@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -18,13 +19,27 @@ import (
 const pollInterval = 5 * time.Second
 
 var (
-	configPath = flag.String("config", "", "Path to configuration file")
-	socketPath = flag.String("socket", "/var/run/clickhouse-watcher/clickhouse-watcher.sock", "Path to Unix socket")
-	dataDir    = flag.String("data", "/var/lib/clickhouse-watcher", "Path to data directory")
+	configPath = flag.String("config", "", "Path to configuration file (default: search in current dir and ~/.config/)")
+	socketPath = flag.String("socket", "/tmp/clickhouse-watcher.sock", "Path to Unix socket")
+	dataDir    = flag.String("data", "", "Path to data directory (default: ~/.local/share/clickhouse-watcher)")
 )
+
+func getDefaultDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "clickhouse-watcher")
+}
 
 func main() {
 	flag.Parse()
+
+	// Determine data directory
+	dataDirPath := *dataDir
+	if dataDirPath == "" {
+		dataDirPath = getDefaultDataDir()
+	}
 
 	// Load configuration first
 	var cfg *config.Config
@@ -73,9 +88,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	dataDirPath := *dataDir
 	if dataDirPath != "" {
-		if err := os.MkdirAll(dataDirPath, 0755); err != nil {
+		if err = os.MkdirAll(dataDirPath, 0755); err != nil {
 			log.Error().Err(err).Str("data_dir", dataDirPath).Msg("Failed to create data directory")
 		} else {
 			log.Info().Str("data_dir", dataDirPath).Msg("Data directory ready")
