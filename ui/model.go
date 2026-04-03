@@ -425,6 +425,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tab = (m.tab + 1) % len(tabNames)
 		m.ttlInput.Blur()
 		uiLog.Debug().Str("tab", tabNames[m.tab]).Msg("Switched tab")
+		// Charger les données immédiatement quand on arrive sur l'onglet History
+		if m.tab == tabHistory {
+			return m, m.cmdFetchHistory()
+		}
 		return m, nil
 	case tea.KeyEnter:
 		switch m.tab {
