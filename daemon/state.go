@@ -28,6 +28,12 @@ type State struct {
 	rrdTotalBytes *rrd.RRD
 	rrdTotalRows  *rrd.RRD
 	rrdUptime     *rrd.RRD
+	rrdDiskUsage  *rrd.RRD
+	rrdCPUUsage   *rrd.RRD
+	rrdMemUsage   *rrd.RRD
+	rrdIngestion  *rrd.RRD
+	rrdUsers      *rrd.RRD
+	rrdErrors     *rrd.RRD
 	dataDir       string
 }
 
@@ -106,6 +112,36 @@ func (s *State) initRRD() {
 		stateLog.Error().Err(err).Msg("Failed to create uptime RRD")
 	}
 
+	s.rrdDiskUsage, err = rrd.New(filepath.Join(s.dataDir, "disk_usage.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create disk_usage RRD")
+	}
+
+	s.rrdCPUUsage, err = rrd.New(filepath.Join(s.dataDir, "cpu_usage.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create cpu_usage RRD")
+	}
+
+	s.rrdMemUsage, err = rrd.New(filepath.Join(s.dataDir, "mem_usage.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create mem_usage RRD")
+	}
+
+	s.rrdIngestion, err = rrd.New(filepath.Join(s.dataDir, "ingestion.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create ingestion RRD")
+	}
+
+	s.rrdUsers, err = rrd.New(filepath.Join(s.dataDir, "users.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create users RRD")
+	}
+
+	s.rrdErrors, err = rrd.New(filepath.Join(s.dataDir, "errors.rrd"))
+	if err != nil {
+		stateLog.Error().Err(err).Msg("Failed to create errors RRD")
+	}
+
 	stateLog.Debug().
 		Str("data_dir", s.dataDir).
 		Msg("RRD storage initialized")
@@ -151,6 +187,102 @@ func (s *State) StartRRD(ctx context.Context) {
 		return int64(m.Uptime.Seconds()), nil
 	}
 	s.rrdUptime.StartScheduler(ctx, collectorUptime)
+
+	// Disk usage collector - using SystemStats
+	collectorDisk := func() (int64, error) {
+		s.mu.RLock()
+		client := s.client
+		s.mu.RUnlock()
+		if client == nil {
+			return 0, fmt.Errorf("not connected")
+		}
+		stats, err := client.GetSystemStats(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(stats.DiskUsagePercent), nil
+	}
+	s.rrdDiskUsage.StartScheduler(ctx, collectorDisk)
+
+	// CPU usage collector
+	collectorCPU := func() (int64, error) {
+		s.mu.RLock()
+		client := s.client
+		s.mu.RUnlock()
+		if client == nil {
+			return 0, fmt.Errorf("not connected")
+		}
+		stats, err := client.GetSystemStats(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(stats.CPUUsagePercent), nil
+	}
+	s.rrdCPUUsage.StartScheduler(ctx, collectorCPU)
+
+	// Memory usage collector
+	collectorMem := func() (int64, error) {
+		s.mu.RLock()
+		client := s.client
+		s.mu.RUnlock()
+		if client == nil {
+			return 0, fmt.Errorf("not connected")
+		}
+		stats, err := client.GetSystemStats(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(stats.MemUsagePercent), nil
+	}
+	s.rrdMemUsage.StartScheduler(ctx, collectorMem)
+
+	// Ingestion speed collector
+	collectorIngestion := func() (int64, error) {
+		s.mu.RLock()
+		client := s.client
+		s.mu.RUnlock()
+		if client == nil {
+			return 0, fmt.Errorf("not connected")
+		}
+		bytes, err := client.GetIngestionSpeed(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(bytes), nil
+	}
+	s.rrdIngestion.StartScheduler(ctx, collectorIngestion)
+
+	// Connected users collector
+	collectorUsers := func() (int64, error) {
+		s.mu.RLock()
+		client := s.client
+		s.mu.RUnlock()
+		if client == nil {
+			return 0, fmt.Errorf("not connected")
+		}
+		count, err := client.GetConnectedUsers(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(count), nil
+	}
+	s.rrdUsers.StartScheduler(ctx, collectorUsers)
+
+	// Error count collector
+	collectorErrors := func() (int64, error) {
+		s.mu.RLock()
+		client := s.client
+		s.mu.RUnlock()
+		if client == nil {
+			return 0, fmt.Errorf("not connected")
+		}
+		count, err := client.GetErrorCount(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(count), nil
+	}
+	s.rrdErrors.StartScheduler(ctx, collectorErrors)
 
 	stateLog.Info().Msg("RRD schedulers started")
 }
@@ -377,6 +509,60 @@ func (s *State) QueryHistory(metric string, period string) ([]rrd.Sample, error)
 			return s.rrdUptime.QueryWeek(), nil
 		case "month":
 			return s.rrdUptime.QueryMonth(), nil
+		}
+	case "disk_usage":
+		switch period {
+		case "day":
+			return s.rrdDiskUsage.QueryDay(), nil
+		case "week":
+			return s.rrdDiskUsage.QueryWeek(), nil
+		case "month":
+			return s.rrdDiskUsage.QueryMonth(), nil
+		}
+	case "cpu_usage":
+		switch period {
+		case "day":
+			return s.rrdCPUUsage.QueryDay(), nil
+		case "week":
+			return s.rrdCPUUsage.QueryWeek(), nil
+		case "month":
+			return s.rrdCPUUsage.QueryMonth(), nil
+		}
+	case "memory_usage":
+		switch period {
+		case "day":
+			return s.rrdMemUsage.QueryDay(), nil
+		case "week":
+			return s.rrdMemUsage.QueryWeek(), nil
+		case "month":
+			return s.rrdMemUsage.QueryMonth(), nil
+		}
+	case "ingestion":
+		switch period {
+		case "day":
+			return s.rrdIngestion.QueryDay(), nil
+		case "week":
+			return s.rrdIngestion.QueryWeek(), nil
+		case "month":
+			return s.rrdIngestion.QueryMonth(), nil
+		}
+	case "users":
+		switch period {
+		case "day":
+			return s.rrdUsers.QueryDay(), nil
+		case "week":
+			return s.rrdUsers.QueryWeek(), nil
+		case "month":
+			return s.rrdUsers.QueryMonth(), nil
+		}
+	case "errors":
+		switch period {
+		case "day":
+			return s.rrdErrors.QueryDay(), nil
+		case "week":
+			return s.rrdErrors.QueryWeek(), nil
+		case "month":
+			return s.rrdErrors.QueryMonth(), nil
 		}
 	}
 

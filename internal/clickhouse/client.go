@@ -451,6 +451,52 @@ WHERE metric = 'MemoryResident') AS mem_usage
 	return &stats, nil
 }
 
+// GetIngestionSpeed returns the total bytes inserted in the last minute
+func (c *Client) GetIngestionSpeed(ctx context.Context) (uint64, error) {
+	query := `
+SELECT sum(bytes)
+FROM system.query_log
+WHERE event_time > now() - INTERVAL 1 MINUTE
+  AND query_kind = 'Insert'
+  AND type = 'QueryFinish'
+`
+	var bytes uint64
+	err := c.conn.QueryRow(ctx, query).Scan(&bytes)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get ingestion speed: %w", err)
+	}
+	return bytes, nil
+}
+
+// GetConnectedUsers returns the number of currently connected users
+func (c *Client) GetConnectedUsers(ctx context.Context) (uint64, error) {
+	query := `
+SELECT countDistinct(user)
+FROM system.processes
+`
+	var count uint64
+	err := c.conn.QueryRow(ctx, query).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get connected users: %w", err)
+	}
+	return count, nil
+}
+
+// GetErrorCount returns the number of errors in the last minute from system.error_log
+func (c *Client) GetErrorCount(ctx context.Context) (uint64, error) {
+	query := `
+SELECT count()
+FROM system.error_log
+WHERE event_time > now() - INTERVAL 1 MINUTE
+`
+	var count uint64
+	err := c.conn.QueryRow(ctx, query).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get error count: %w", err)
+	}
+	return count, nil
+}
+
 func (c *Client) Exec(ctx context.Context, query string) error {
 	return c.conn.Exec(ctx, query)
 }

@@ -37,7 +37,7 @@ const (
 
 var tabNames = []string{"Dashboard", "Tables", "Fat Tables", "Processes", "Disk", "History"}
 
-var historyMetrics = []string{"total_bytes", "total_rows", "uptime"}
+var historyMetrics = []string{"total_bytes", "total_rows", "uptime", "disk_usage", "cpu_usage", "memory_usage", "ingestion", "users", "errors"}
 var historyPeriods = []string{"day", "week", "month"}
 
 var uiLog = logger.WithComponent("ui")
@@ -1316,6 +1316,14 @@ func formatHistoryValue(metric string, v int64) string {
 		return humanize.Comma(v) + " rows"
 	case "uptime":
 		return formatDuration(time.Duration(v) * time.Second)
+	case "disk_usage", "cpu_usage", "memory_usage":
+		return fmt.Sprintf("%d%%", v)
+	case "ingestion":
+		return humanize.Bytes(uint64(v)) + "/min"
+	case "users":
+		return fmt.Sprintf("%d users", v)
+	case "errors":
+		return fmt.Sprintf("%d errors/min", v)
 	}
 	return humanize.Comma(v)
 }
