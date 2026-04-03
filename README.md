@@ -49,7 +49,23 @@ make docker-up
 sleep 15
 ```
 
-2. Configure your connection in `config.yaml`:
+2. Create a read-only user for the watcher (optional but recommended):
+
+```sql
+-- Connect to ClickHouse as admin and execute:
+CREATE USER IF NOT EXISTS the_watcher IDENTIFIED BY 'secure_password';
+
+-- Grant read-only access to system tables
+GRANT SELECT ON system.* TO the_watcher;
+
+-- Grant read-only access to all databases (for table metrics)
+GRANT SELECT ON *.* TO the_watcher;
+
+-- Grant usage on all databases
+GRANT SHOW DATABASES ON *.* TO the_watcher;
+```
+
+3. Configure your connection in `config.yaml`:
 
 ```yaml
 connections:
@@ -58,17 +74,17 @@ connections:
     host: "localhost"
     port: 9000
     database: "default"
-    username: "default"
-    password: ""
+    username: "the_watcher"
+    password: "secure_password"
 ```
 
-3. Start the daemon:
+4. Start the daemon:
 
 ```bash
 ./build/clickhouse-watcherd
 ```
 
-4. In another terminal, start the client:
+5. In another terminal, start the client:
 
 ```bash
 ./build/clickhouse-watch
