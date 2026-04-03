@@ -39,33 +39,72 @@ This creates two binaries in the `build/` directory:
 - `clickhouse-watcherd` - the daemon
 - `clickhouse-watch` - the TUI client
 
-### Run
+### Production Installation
 
-1. Start ClickHouse:
+For production deployment with systemd, follow these steps:
+
+#### 1. Create System User and Group
 
 ```bash
-make docker-up
-# Wait for it to be ready
-sleep 15
+# Create system user for the daemon
+sudo useradd --system --home-dir /var/lib/clickhouse-watcher \
+  --shell /usr/sbin/nologin clickhouse_watcher
+
+# Create group for authorized clients
+sudo groupadd --system clickhouse_watcherd
+
+# Add your user to the group to allow client connections
+sudo usermod -aG clickhouse_watcherd $USER
+# Log out and log back in for group changes to take effect
 ```
 
-2. Create a read-only user for the watcher (optional but recommended):
+#### 2. Install Binaries
+
+```bash
+# Build the project
+make build
+
+# Install binaries to system location
+sudo cp build/clickhouse-watcherd /usr/local/bin/
+sudo cp build/clickhouse-watch /usr/local/bin/
+sudo chmod 755 /usr/local/bin/clickhouse-watcherd /usr/local/bin/clickhouse-watch
+
+# Set ownership for daemon binary
+sudo chown root:root /usr/local/bin/clickhouse-watcherd
+```
+
+#### 3. Create Directories
+
+```bash
+# Create configuration directory
+sudo mkdir -p /etc/clickhouse-watcher
+sudo chmod 755 /etc/clickhouse-watcher
+
+# Create data directory for RRD storage
+sudo mkdir -p /var/lib/clickhouse-watcher
+sudo chown clickhouse_watcher:clickhouse_watcherd /var/lib/clickhouse-watcher
+sudo chmod 750 /var/lib/clickhouse-watcher
+
+# Create runtime directory (will be managed by systemd)
+sudo mkdir -p /run/clickhouse-watcher
+sudo chown clickhouse_watcher:clickhouse_watcherd /run/clickhouse-watcher
+sudo chmod 2775 /run/clickhouse-watcher
+```
+
+#### 4. Create ClickHouse User
+
+Connect to ClickHouse as admin and execute:
 
 ```sql
--- Connect to ClickHouse as admin and execute:
 CREATE USER IF NOT EXISTS the_watcher IDENTIFIED BY 'secure_password';
-
--- Grant read-only access to system tables
 GRANT SELECT ON system.* TO the_watcher;
-
--- Grant read-only access to all databases (for table metrics)
 GRANT SELECT ON *.* TO the_watcher;
-
--- Grant usage on all databases
 GRANT SHOW DATABASES ON *.* TO the_watcher;
 ```
 
-3. Configure your connection in `config.yaml`:
+#### 5. Configure
+
+Create `/etc/clickhouse-watcher/config.yaml`:
 
 ```yaml
 connections:
@@ -76,17 +115,59 @@ connections:
     database: "default"
     username: "the_watcher"
     password: "secure_password"
+
+log:
+  level: "info"
+  path: "/var/log/clickhouse-watcher/daemon.log"
+  pretty: false
 ```
 
-4. Start the daemon:
+Set permissions:
+```bash
+sudo chown root:clickhouse_watcherd /etc/clickhouse-watcher/config.yaml
+sudo chmod 640 /etc/clickhouse-watcher/config.yaml
+```
+
+#### 6. Install systemd Service
 
 ```bash
+# Copy service file
+sudo cp systemd/clickhouse-watcherd.service /etc/systemd/system/
+sudo cp systemd/clickhouse-watcherd.conf /etc/tmpfiles.d/
+
+# Reload systemd
+sudo systemctl daemon-reload
+sudo systemd-tmpfiles --create
+
+# Enable and start service
+sudo systemctl enable clickhouse-watcherd
+sudo systemctl start clickhouse-watcherd
+
+# Check status
+sudo systemctl status clickhouse-watcherd
+```
+
+#### 7. Run Client
+
+After installing and starting the daemon, any user in the `clickhouse_watcherd` group can connect:
+
+```bash
+clickhouse-watch
+```
+
+### Development/Local Run
+
+For quick testing without systemd:
+
+```bash
+# Start ClickHouse
+make docker-up
+sleep 15
+
+# Run daemon in foreground
 ./build/clickhouse-watcherd
-```
 
-5. In another terminal, start the client:
-
-```bash
+# In another terminal, run client
 ./build/clickhouse-watch
 ```
 

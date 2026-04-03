@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -15,22 +15,25 @@ import (
 	"github.com/athoune/clickhouse-watcher/logger"
 )
 
-const (
-	socketPath   = "/tmp/clickhouse-watcher.sock"
-	pollInterval = 5 * time.Second
+const pollInterval = 5 * time.Second
+
+var (
+	configPath = flag.String("config", "", "Path to configuration file")
+	socketPath = flag.String("socket", "/var/run/clickhouse-watcher/clickhouse-watcher.sock", "Path to Unix socket")
+	dataDir    = flag.String("data", "/var/lib/clickhouse-watcher", "Path to data directory")
 )
 
-func getDataDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".local", "share", "clickhouse-watcher")
-}
-
 func main() {
+	flag.Parse()
+
 	// Load configuration first
-	cfg, err := config.Load()
+	var cfg *config.Config
+	var err error
+	if *configPath != "" {
+		cfg, err = config.LoadFrom(*configPath)
+	} else {
+		cfg, err = config.Load()
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
@@ -70,17 +73,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	dataDir := getDataDir()
-	if dataDir != "" {
-		if err := os.MkdirAll(dataDir, 0755); err != nil {
-			log.Error().Err(err).Str("data_dir", dataDir).Msg("Failed to create data directory")
+	dataDirPath := *dataDir
+	if dataDirPath != "" {
+		if err := os.MkdirAll(dataDirPath, 0755); err != nil {
+			log.Error().Err(err).Str("data_dir", dataDirPath).Msg("Failed to create data directory")
 		} else {
-			log.Info().Str("data_dir", dataDir).Msg("Data directory ready")
-			fmt.Printf("Data directory: %s\n", dataDir)
+			log.Info().Str("data_dir", dataDirPath).Msg("Data directory ready")
+			fmt.Printf("Data directory: %s\n", dataDirPath)
 		}
 	}
 
-	state := daemon.NewState(conn, dataDir)
+	state := daemon.NewState(conn, dataDirPath)
 	if err := state.Connect(); err != nil {
 		log.Error().Err(err).Msg("Failed to connect to ClickHouse")
 		fmt.Fprintf(os.Stderr, "Failed to connect to ClickHouse: %v\n", err)
@@ -89,15 +92,15 @@ func main() {
 	log.Info().Msg("Connected to ClickHouse")
 	fmt.Println("Connected to ClickHouse")
 
-	server := daemon.NewServer(state, socketPath, pollInterval)
+	server := daemon.NewServer(state, *socketPath, pollInterval)
 	if err := server.Start(); err != nil {
 		log.Error().Err(err).Msg("Failed to start daemon server")
 		fmt.Fprintf(os.Stderr, "Failed to start daemon: %v\n", err)
 		state.Close()
 		os.Exit(1)
 	}
-	log.Info().Str("socket", socketPath).Msg("Daemon server started")
-	fmt.Printf("Daemon listening on %s\n", socketPath)
+	log.Info().Str("socket", *socketPath).Msg("Daemon server started")
+	fmt.Printf("Daemon listening on %s\n", *socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -115,7 +118,7 @@ func main() {
 	cancel()
 	server.Stop()
 	state.Close()
-	os.Remove(socketPath)
+	os.Remove(*socketPath)
 	log.Info().Msg("Daemon stopped")
 	fmt.Println("Daemon stopped")
 }

@@ -1,0 +1,49 @@
+[Unit]
+Description=ClickHouse Watcher Daemon
+Documentation=https://github.com/athoune/clickhouse-watcher
+After=network.target
+
+[Service]
+Type=simple
+User=clickhouse_watcher
+Group=clickhouse_watcherd
+
+# Create runtime directory with correct permissions
+RuntimeDirectory=clickhouse-watcher
+RuntimeDirectoryMode=0755
+
+# Paths
+ExecStart=/usr/local/bin/clickhouse-watcherd -config /etc/clickhouse-watcher/config.yaml -socket /run/clickhouse-watcher/clickhouse-watcher.sock -data /var/lib/clickhouse-watcher
+WorkingDirectory=/var/lib/clickhouse-watcher
+
+# Ensure socket directory has correct permissions for group access
+ExecStartPre=/bin/chown clickhouse_watcher:clickhouse_watcherd /run/clickhouse-watcher
+ExecStartPre=/bin/chmod 2775 /run/clickhouse-watcher
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/clickhouse-watcher /run/clickhouse-watcher
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

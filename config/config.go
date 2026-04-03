@@ -58,6 +58,27 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
+// LoadFrom loads configuration from a specific file path
+func LoadFrom(path string) (*Config, error) {
+	// Set defaults
+	viper.SetDefault("log.level", "info")
+	viper.SetDefault("log.path", "")
+	viper.SetDefault("log.pretty", false)
+
+	viper.SetConfigFile(path)
+
+	if err := viper.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("failed to read config from %s: %w", path, err)
+	}
+
+	var cfg Config
+	if err := viper.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	return &cfg, nil
+}
+
 func (c *Config) GetFirstConnection() *ConnectionConfig {
 	for _, conn := range c.Connections {
 		return &conn

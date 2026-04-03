@@ -62,6 +62,18 @@ install: build
 	@cp $(BUILD_DIR)/$(BINARY_DAEMON) /usr/local/bin/
 	@cp $(BUILD_DIR)/$(BINARY_CLIENT) /usr/local/bin/
 
+install-systemd: install
+	@echo "Installing systemd files..."
+	@mkdir -p /etc/clickhouse-watcher
+	@mkdir -p /var/lib/clickhouse-watcher
+	@mkdir -p /etc/systemd/system
+	@mkdir -p /etc/tmpfiles.d
+	@cp systemd/clickhouse-watcherd.service /etc/systemd/system/
+	@cp systemd/clickhouse-watcherd.conf /etc/tmpfiles.d/
+	@systemctl daemon-reload
+	@systemd-tmpfiles --create
+	@echo "Systemd files installed. Run: sudo systemctl enable --now clickhouse-watcherd"
+
 run-daemon: build-daemon
 	@echo "Starting daemon..."
 	@$(BUILD_DIR)/$(BINARY_DAEMON)
