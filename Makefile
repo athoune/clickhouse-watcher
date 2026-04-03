@@ -1,5 +1,6 @@
 .PHONY: all build test clean install run-daemon run-client lint vet
 
+GIT_VERSION?=$(shell git describe --tags --always --abbrev=21 --dirty)
 BINARY_DAEMON=clickhouse-watcherd
 BINARY_CLIENT=clickhouse-watch
 BUILD_DIR=build
@@ -12,6 +13,7 @@ GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
 GOCLEAN=$(GOCMD) clean
 GOMOD=$(GOCMD) mod
+GOFLAGS=-ldflags "-X github.com/athoune/clickhouse-watcher/version.version=$(GIT_VERSION)"
 
 all: test build
 
@@ -20,12 +22,12 @@ build: build-daemon build-client
 build-daemon:
 	@echo "Building $(BINARY_DAEMON)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_DAEMON) ./cmd/daemon
+	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
 
 build-client:
 	@echo "Building $(BINARY_CLIENT)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_CLIENT) ./cmd/client
+	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
 
 clean:
 	@echo "Cleaning..."

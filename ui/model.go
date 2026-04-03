@@ -10,6 +10,7 @@ import (
 	"github.com/athoune/clickhouse-watcher/internal/clickhouse"
 	"github.com/athoune/clickhouse-watcher/logger"
 	"github.com/athoune/clickhouse-watcher/rrd"
+	"github.com/athoune/clickhouse-watcher/version"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -1002,7 +1003,8 @@ func (m *Model) renderMetricsContent() string {
 	// Two-column card layout.
 	type kv struct{ label, value string }
 	left := []kv{
-		{"Version", m.metrics.Version},
+		{"Server Version", m.metrics.Version},
+		{"Tool Version", version.Version()},
 		{"Uptime", formatDuration(m.metrics.Uptime)},
 		{"Total Rows", humanize.Comma(int64(m.metrics.TotalRows))},
 	}
