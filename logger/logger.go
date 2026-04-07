@@ -11,6 +11,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// discardWriter is a writer that discards all output
+type discardWriter struct{}
+
+func (d discardWriter) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
 // Config holds logging configuration
 type Config struct {
 	Level  string
@@ -38,6 +45,7 @@ func Init() {
 //   - "" (empty) -> stderr
 //   - "stdout" -> stdout
 //   - "stderr" -> stderr
+//   - "discard" / "null" -> discard all logs (for TUI applications)
 //   - file path -> write to file
 func InitWithConfig(cfg Config) {
 	// Configure time format
@@ -54,6 +62,10 @@ func InitWithConfig(cfg Config) {
 		zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	case "error":
 		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	case "fatal":
+		zerolog.SetGlobalLevel(zerolog.FatalLevel)
+	case "disabled", "none":
+		zerolog.SetGlobalLevel(zerolog.Disabled)
 	default:
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	}
@@ -65,6 +77,8 @@ func InitWithConfig(cfg Config) {
 		output = os.Stderr
 	case "stdout":
 		output = os.Stdout
+	case "discard", "null":
+		output = discardWriter{}
 	default:
 		// Open log file
 		file, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
