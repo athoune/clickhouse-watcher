@@ -433,6 +433,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
 	case tea.KeyEsc:
+		// ESC only goes back, never quits the app
 		if m.tab == tabDashboard && m.tableDetail != nil {
 			m.tableDetail = nil
 			m.actionMsg = ""
@@ -440,7 +441,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.refreshDashboard()
 			return m, nil
 		}
-		return m, tea.Quit
+		// If not in a detail view, ESC does nothing (use 'q' to quit)
+		return m, nil
 	case tea.KeyTab:
 		m.tab = (m.tab + 1) % len(tabNames)
 		m.ttlInput.Blur()
@@ -479,6 +481,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "q":
+		return m, tea.Quit
 	case "r":
 		uiLog.Debug().Str("tab", tabNames[m.tab]).Msg("Manual refresh triggered")
 		return m, m.cmdRefresh()
@@ -895,10 +899,10 @@ func (m *Model) connectView() string {
 				mutedStyle.Render("  "+m.connectErr) + "\n\n" +
 				mutedStyle.Render("  Please ensure clickhouse-watch and clickhouse-watcherd") + "\n" +
 				mutedStyle.Render("  are the same version (e.g., rebuild both with 'make build')") + "\n\n" +
-				mutedStyle.Render("  Press ESC to quit")
+				mutedStyle.Render("  Press 'q' to quit")
 		} else {
 			status = errorStyle.Render("  Connection failed: "+m.connectErr) +
-				"\n\n" + mutedStyle.Render("  Press ESC to quit")
+				"\n\n" + mutedStyle.Render("  Press 'q' to quit")
 		}
 	} else {
 		status = mutedStyle.Render("  Connecting to ") +
@@ -996,21 +1000,21 @@ func (m *Model) renderHelpBar() string {
 	case tabDashboard:
 		if m.tableDetail != nil {
 			if m.ttlInput.Focused() {
-				keys = []string{"Enter:apply", "Esc:cancel"}
+				keys = []string{"Enter:apply", "Esc:cancel", "q:quit"}
 			} else {
-				keys = []string{"t:truncate", "l:TTL", "Esc:back", "r:refresh"}
+				keys = []string{"t:truncate", "l:TTL", "Esc:back", "r:refresh", "q:quit"}
 			}
 		} else {
-			keys = []string{"r:refresh", "Tab:next"}
+			keys = []string{"r:refresh", "Tab:next", "q:quit"}
 		}
 	case tabFatTables:
-		keys = []string{"↑↓:select", "Enter:detail", "t:truncate", "r:refresh", "Tab:next"}
+		keys = []string{"↑↓:select", "Enter:detail", "t:truncate", "r:refresh", "Tab:next", "q:quit"}
 	case tabProcesses:
-		keys = []string{"↑↓:scroll", "r:refresh", "Tab:next"}
+		keys = []string{"↑↓:scroll", "r:refresh", "Tab:next", "q:quit"}
 	case tabDisk:
-		keys = []string{"↑↓:select", "r:refresh", "Tab:next"}
+		keys = []string{"↑↓:select", "r:refresh", "Tab:next", "q:quit"}
 	case tabHistory:
-		keys = []string{"↑↓:metric", "←→:period", "r:refresh", "Tab:next"}
+		keys = []string{"↑↓:metric", "←→:period", "r:refresh", "Tab:next", "q:quit"}
 	}
 
 	var b strings.Builder
