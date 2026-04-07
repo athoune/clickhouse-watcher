@@ -21,23 +21,28 @@ func main() {
 	}
 
 	// Initialize logger with configuration
-	// For TUI client, default to no logging to avoid interfering with
-	// the terminal interface. Logs can be enabled by setting log.path in config
+	// Default behavior for TUI client:
+	// - Only ERROR level logs go to stderr (for important errors)
+	// - INFO logs are optional and go to a file if log.path is configured
 	logCfg := cfg.GetLogConfig()
 
-	// If no explicit log configuration, disable logging completely for TUI
-	if logCfg.Path == "" && logCfg.Level == "" {
-		// Default: discard all logs for TUI to prevent screen corruption
+	if logCfg.Path != "" {
+		// If log file is configured, write INFO+ logs to file, nothing to stderr
+		level := logCfg.Level
+		if level == "" {
+			level = "info" // Default to INFO if path is set but level isn't
+		}
 		logger.InitWithConfig(logger.Config{
-			Level:  "disabled",
-			Path:   "discard",
-			Pretty: false,
-		})
-	} else {
-		logger.InitWithConfig(logger.Config{
-			Level:  logCfg.Level,
+			Level:  level,
 			Path:   logCfg.Path,
 			Pretty: logCfg.Pretty,
+		})
+	} else {
+		// No log file configured: only ERROR+ goes to stderr
+		logger.InitWithConfig(logger.Config{
+			Level:  "error",
+			Path:   "stderr",
+			Pretty: false,
 		})
 	}
 
