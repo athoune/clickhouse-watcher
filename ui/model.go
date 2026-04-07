@@ -302,7 +302,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.loading = false
-		m.connectErr = msg.err.Error()
+		// Check if this is a version mismatch error and format it nicely
+		errStr := msg.err.Error()
+		if strings.Contains(errStr, "Version mismatch") {
+			m.connectErr = "Version mismatch: client and server versions are different. Please ensure both are the same version."
+		} else {
+			m.connectErr = errStr
+		}
 		uiLog.Error().Err(msg.err).Msg("Connection error")
 		return m, nil
 
@@ -888,8 +894,17 @@ func (m *Model) connectView() string {
 	logo := logoStyle.Align(lipgloss.Center).Width(m.width).Render(asciiLogo)
 	var status string
 	if m.connectErr != "" {
-		status = errorStyle.Render("  Connection failed: "+m.connectErr) +
-			"\n\n" + mutedStyle.Render("  Press ESC to quit")
+		// Check if this is a version mismatch error
+		if strings.Contains(m.connectErr, "Version mismatch") {
+			status = errorStyle.Render("  ✗ Version mismatch") + "\n\n" +
+				mutedStyle.Render("  "+m.connectErr) + "\n\n" +
+				mutedStyle.Render("  Please ensure clickhouse-watch and clickhouse-watcherd") + "\n" +
+				mutedStyle.Render("  are the same version (e.g., rebuild both with 'make build')") + "\n\n" +
+				mutedStyle.Render("  Press ESC to quit")
+		} else {
+			status = errorStyle.Render("  Connection failed: "+m.connectErr) +
+				"\n\n" + mutedStyle.Render("  Press ESC to quit")
+		}
 	} else {
 		status = mutedStyle.Render("  Connecting to ") +
 			dimValueStyle.Render(m.daemon.SocketPath()) +
