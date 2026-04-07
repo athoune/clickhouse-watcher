@@ -228,6 +228,13 @@ type Model struct {
 
 	// system stats
 	systemStats *clickhouse.SystemStats
+
+	// confirmation popup state
+	confirmingAction string
+	confirmDatabase  string
+	confirmTable     string
+	confirmTableSize string
+	confirmCallback  func() tea.Cmd
 }
 
 func New(socketPath string) *Model {
@@ -381,6 +388,25 @@ func (m *Model) updateFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Confirmation popup takes precedence
+	if m.confirmingAction != "" {
+		switch msg.String() {
+		case "y", "Y":
+			callback := m.confirmCallback
+			// Reset state before executing
+			m.confirmingAction = ""
+			m.confirmCallback = nil
+			return m, callback()
+		case "n", "N", "esc":
+			m.confirmingAction = ""
+			m.confirmCallback = nil
+			m.actionMsg = "Truncate cancelled"
+			return m, nil
+		default:
+			return m, nil // Consume all other keys
+		}
+	}
+
 	// TTL input consumes all keys while focused.
 	if m.tab == tabDashboard && m.tableDetail != nil && m.ttlInput.Focused() {
 		switch msg.Type {
@@ -457,6 +483,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				Str("table", m.tableDetail.Name).
 				Msg("Truncate requested")
 			return m, m.cmdTruncate()
+		}
+		if m.tab == tabFatTables {
+			idx := m.fatTable.Cursor()
+			if idx < 0 || idx >= len(m.truncatables) {
+				return m, nil
+			}
+			t := m.truncatables[idx]
+			if !t.Truncatable {
+				m.actionMsg = "Table not marked as safe to truncate"
+				return m, nil
+			}
+			return m, m.cmdConfirmTruncate(t.Database, t.Table, t.Size)
 		}
 	case "l":
 		if m.tab == tabDashboard && m.tableDetail != nil {
@@ -604,6 +642,41 @@ func (m *Model) cmdFatTableSelect() tea.Cmd {
 			Database: t.Database,
 			Name:     t.Table,
 		}}
+	}
+}
+
+func (m *Model) cmdConfirmTruncate(db, table, size string) tea.Cmd {
+	return func() tea.Msg {
+		m.confirmingAction = "truncate"
+		m.confirmDatabase = db
+		m.confirmTable = table
+		m.confirmTableSize = size
+		m.confirmCallback = func() tea.Cmd {
+			return m.cmdTruncateSelectedTable()
+		}
+		return nil
+	}
+}
+
+func (m *Model) cmdTruncateSelectedTable() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		err := m.daemon.TruncateTable(ctx, m.confirmDatabase, m.confirmTable)
+		if err != nil {
+			return errMsg{fmt.Errorf("truncate failed: %w", err)}
+		}
+
+		// Reset confirmation state
+		m.confirmingAction = ""
+		m.confirmDatabase = ""
+		m.confirmTable = ""
+		m.confirmTableSize = ""
+		m.confirmCallback = nil
+
+		// Refresh truncatables list
+		return actionDoneMsg{fmt.Sprintf("Table %s.%s truncated", m.confirmDatabase, m.confirmTable)}
 	}
 }
 
@@ -801,6 +874,10 @@ func (m *Model) View() string {
 	if m.loading || m.connectErr != "" {
 		return m.connectView()
 	}
+	// Show confirmation dialog if active
+	if m.confirmingAction != "" {
+		return m.renderConfirmationDialog()
+	}
 	return m.renderTabBar() + "\n" +
 		m.renderContent() + "\n" +
 		m.renderStatsBar() + "\n" +
@@ -917,7 +994,7 @@ func (m *Model) renderHelpBar() string {
 			keys = []string{"r:refresh", "Tab:next"}
 		}
 	case tabFatTables:
-		keys = []string{"↑↓:select", "Enter:detail", "r:refresh", "Tab:next"}
+		keys = []string{"↑↓:select", "Enter:detail", "t:truncate", "r:refresh", "Tab:next"}
 	case tabProcesses:
 		keys = []string{"↑↓:scroll", "r:refresh", "Tab:next"}
 	case tabDisk:
@@ -960,6 +1037,62 @@ func (m *Model) renderHelpBar() string {
 	fill := helpBarStyle.Render(strings.Repeat(" ", gap))
 
 	return left + fill + right
+}
+
+func (m *Model) renderConfirmationDialog() string {
+	dialogWidth := 60
+	dialogHeight := 10
+
+	title := "Confirm Truncate"
+	message := fmt.Sprintf("Are you sure you want to truncate table '%s.%s' (%s)?\n\nThis action cannot be undone.",
+		m.confirmDatabase, m.confirmTable, m.confirmTableSize)
+
+	// Styles
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#FFD700")).
+		Background(clrSurface).
+		Padding(2).
+		Width(dialogWidth)
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFD700")).
+		Bold(true).
+		MarginBottom(1)
+
+	// Content
+	var content strings.Builder
+	content.WriteString(titleStyle.Render(title) + "\n")
+	content.WriteString(message + "\n\n")
+	content.WriteString(helpKeyStyle.Render("y") + helpBarStyle.Render(":yes  ") +
+		helpKeyStyle.Render("n") + helpBarStyle.Render(":no  ") +
+		helpKeyStyle.Render("esc") + helpBarStyle.Render(":cancel"))
+
+	dialog := dialogStyle.Render(content.String())
+
+	// Center on screen
+	paddingTop := (m.contentHeight() - dialogHeight) / 2
+	if paddingTop < 0 {
+		paddingTop = 0
+	}
+	paddingLeft := (m.width - dialogWidth) / 2
+	if paddingLeft < 0 {
+		paddingLeft = 0
+	}
+
+	// Semi-transparent overlay effect
+	overlayStyle := lipgloss.NewStyle().
+		Background(clrSurface).
+		Width(m.width).
+		Height(m.height)
+
+	// Position the dialog
+	positionedDialog := lipgloss.NewStyle().
+		MarginTop(paddingTop).
+		MarginLeft(paddingLeft).
+		Render(dialog)
+
+	return overlayStyle.Render(positionedDialog)
 }
 
 func (m *Model) renderContent() string {
