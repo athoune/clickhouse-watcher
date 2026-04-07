@@ -500,7 +500,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.actionMsg = "Table not marked as safe to truncate"
 				return m, nil
 			}
-			return m, m.cmdConfirmTruncate(t.Database, t.Table, t.Size)
+			// Afficher immédiatement la modale (pas de commande async)
+			m.confirmingAction = "truncate"
+			m.confirmDatabase = t.Database
+			m.confirmTable = t.Table
+			m.confirmTableSize = t.Size
+			m.confirmCallback = func() tea.Cmd {
+				return m.cmdTruncateSelectedTable()
+			}
+			return m, nil
 		}
 	case "l":
 		if m.tab == tabDashboard && m.tableDetail != nil {
@@ -648,19 +656,6 @@ func (m *Model) cmdFatTableSelect() tea.Cmd {
 			Database: t.Database,
 			Name:     t.Table,
 		}}
-	}
-}
-
-func (m *Model) cmdConfirmTruncate(db, table, size string) tea.Cmd {
-	return func() tea.Msg {
-		m.confirmingAction = "truncate"
-		m.confirmDatabase = db
-		m.confirmTable = table
-		m.confirmTableSize = size
-		m.confirmCallback = func() tea.Cmd {
-			return m.cmdTruncateSelectedTable()
-		}
-		return nil
 	}
 }
 
