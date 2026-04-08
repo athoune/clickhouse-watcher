@@ -100,8 +100,7 @@ WHERE (create_table_query LIKE '%TTL %') AND (NOT (create_table_query LIKE '%SYS
 
 ```sql
 SELECT
-    size.database,
-    size.`table`,
+    concat(size.database,'.', size.`table`) AS table,
     size.disk_name,
     size.percent,
     size.bytes,
@@ -112,7 +111,7 @@ FROM
     SELECT
         database,
         `table`,
-        disk_name,
+        disk_name AS disk,
         round((100 * sum(bytes_on_disk)) / median(disks.total_space), 5) AS percent,
         sum(bytes_on_disk) AS bytes
     FROM system.parts AS parts
@@ -161,6 +160,35 @@ INNER JOIN
     WHERE (database = 'plausible') AND (engine != 'MergeTree')
 ) AS tables ON (tables.database = parts.database) AND (parts.`table` = tables.name)
 ```
+
+## Partition
+
+```sql
+SELECT
+    concat(database,'.', name) AS table,
+    partition,
+    ttl
+FROM (
+    SELECT
+        database,
+        name,
+        regexpExtract(create_table_query, 'PARTITION BY (.*?) (PRIMARY KEY)?', 1) AS partition
+    FROM system.tables
+    WHERE create_table_query LIKE '%PARTITION BY%'
+) AS partition
+LEFT JOIN (
+    SELECT
+        database,
+        name,
+        trimRight(extractGroups(create_table_query, 'TTL (.*?)( +COMMENT|SETTINGS.*)?;?$')[1]) AS ttl
+        FROM system.tables
+    WHERE (create_table_query LIKE '%TTL %') AND (NOT (create_table_query LIKE '%SYSTEM TTL%'))
+) AS ttl
+ON partition.name = ttl.name AND partition.database = ttl.database
+ORDER BY table
+```
+
+## Truncate
 
 ```sql
 SELECT

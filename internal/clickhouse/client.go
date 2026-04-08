@@ -71,14 +71,6 @@ type TruncatableTable struct {
 	PartitionKey string
 }
 
-type DiskMetric struct {
-	Database string
-	Table    string
-	DiskName string
-	Percent  float64
-	Bytes    uint64
-}
-
 type QueryResult struct {
 	Headers []string
 	Rows    [][]string
@@ -439,44 +431,6 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResult, 
 		Headers: headers,
 		Rows:    results,
 	}, nil
-}
-
-func (c *Client) GetDiskMetrics(ctx context.Context) ([]DiskMetric, error) {
-	query := `
-SELECT
-    database,
-    "table",
-    disk_name,
-    round((100 * sum(bytes_on_disk)) / median(disks.total_space), 5) AS percent,
-    sum(bytes_on_disk) AS bytes
-FROM system.parts AS parts
-INNER JOIN system.disks AS disks ON parts.disk_name = disks.name
-GROUP BY
-    database,
-    "table",
-    disk_name
-ORDER BY
-    disk_name ASC,
-    database ASC,
-    "table" ASC,
-    bytes DESC
-	`
-	rows, err := c.conn.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query disk metrics: %w", err)
-	}
-	defer rows.Close()
-
-	var metrics []DiskMetric
-	for rows.Next() {
-		var m DiskMetric
-		err = rows.Scan(&m.Database, &m.Table, &m.DiskName, &m.Percent, &m.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan disk metric: %w", err)
-		}
-		metrics = append(metrics, m)
-	}
-	return metrics, nil
 }
 
 func (c *Client) GetSystemStats(ctx context.Context) (*SystemStats, error) {

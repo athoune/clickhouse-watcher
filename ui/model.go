@@ -31,11 +31,10 @@ const (
 	tabDashboard = 0
 	tabFatTables = 1
 	tabProcesses = 2
-	tabDisk      = 3
-	tabHistory   = 4
+	tabHistory   = 3
 )
 
-var tabNames = []string{"Dashboard", "Fat Tables", "Processes", "Disk", "History"}
+var tabNames = []string{"Dashboard", "Fat Tables", "Processes", "History"}
 
 var historyMetrics = []string{"total_bytes", "total_rows", "disk_usage", "cpu_usage", "memory_usage", "ingestion", "users", "errors"}
 var historyPeriods = []string{"day", "week", "month"}
@@ -51,7 +50,6 @@ type errMsg struct{ err error }
 type metricsMsg struct{ metrics *clickhouse.SystemMetrics }
 type truncatablesMsg struct{ tables []clickhouse.TruncatableTable }
 type queriesMsg struct{ queries []clickhouse.QueryMetric }
-type diskMsg struct{ metrics []clickhouse.DiskMetric }
 type systemStatsMsg struct{ stats *clickhouse.SystemStats }
 type historyMsg struct{ samples []rrd.Sample }
 type tableDetailMsg struct{ detail *clickhouse.TableDetail }
@@ -204,14 +202,12 @@ type Model struct {
 	metrics      *clickhouse.SystemMetrics
 	truncatables []clickhouse.TruncatableTable
 	queries      []clickhouse.QueryMetric
-	diskMetrics  []clickhouse.DiskMetric
 	historyData  []rrd.Sample
 
 	// pane components
 	dashViewport viewport.Model
 	fatTable     table.Model
 	procViewport viewport.Model
-	diskTable    table.Model
 	histViewport viewport.Model
 	ttlInput     textinput.Model
 
@@ -295,7 +291,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cmdFetchMetrics(),
 			m.cmdFetchTruncatables(),
 			m.cmdFetchQueries(),
-			m.cmdFetchDisks(),
 			m.cmdProcessTick(),
 			m.cmdSystemStatsTick(),
 		)
@@ -326,11 +321,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.queries = msg.queries
 		m.procRefreshAt = time.Now()
 		m.refreshProcesses()
-		return m, nil
-
-	case diskMsg:
-		m.diskMetrics = msg.metrics
-		m.rebuildDiskTable()
 		return m, nil
 
 	case systemStatsMsg:
@@ -382,9 +372,6 @@ func (m *Model) updateFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tabProcesses:
 		m.procViewport, cmd = m.procViewport.Update(msg)
-		return m, cmd
-	case tabDisk:
-		m.diskTable, cmd = m.diskTable.Update(msg)
 		return m, cmd
 	case tabHistory:
 		m.histViewport, cmd = m.histViewport.Update(msg)
@@ -582,18 +569,6 @@ func (m *Model) cmdFetchQueries() tea.Cmd {
 	}
 }
 
-func (m *Model) cmdFetchDisks() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		metrics, err := m.daemon.GetDiskMetrics(ctx)
-		if err != nil {
-			return errMsg{err}
-		}
-		return diskMsg{metrics}
-	}
-}
-
 // cmdProcessTick schedules the next automatic process-list refresh.
 func (m *Model) cmdProcessTick() tea.Cmd {
 	return tea.Tick(processRefreshInterval, func(time.Time) tea.Msg {
@@ -640,8 +615,6 @@ func (m *Model) cmdRefresh() tea.Cmd {
 		return m.cmdFetchTruncatables()
 	case tabProcesses:
 		return m.cmdFetchQueries()
-	case tabDisk:
-		return m.cmdFetchDisks()
 	case tabHistory:
 		return m.cmdFetchHistory()
 	}
@@ -735,7 +708,6 @@ func (m *Model) resizePanes() {
 	m.histViewport.Height = h
 
 	m.rebuildFatTable()
-	m.rebuildDiskTable()
 }
 
 // contentHeight returns the usable lines between the tab bar and the help bar.
@@ -816,48 +788,6 @@ func (m *Model) rebuildFatTable() {
 	)
 	m.fatTable.SetStyles(tblStyle)
 	m.fatTable.SetCursor(cur)
-}
-
-func (m *Model) rebuildDiskTable() {
-	w := m.tableWidth()
-	dbW := w / 6
-	tableW := w / 6
-	diskW := w / 8
-	percentW := 12
-	bytesW := 12
-	h := m.contentHeight() - 2
-	if h < 1 {
-		h = 1
-	}
-	cur := m.diskTable.Cursor()
-	rows := make([]table.Row, 0, len(m.diskMetrics))
-	for _, d := range m.diskMetrics {
-		percentStr := fmt.Sprintf("%.2f%%", d.Percent)
-		rows = append(rows, table.Row{
-			d.Database,
-			d.Table,
-			d.DiskName,
-			percentStr,
-			humanize.Bytes(d.Bytes),
-		})
-	}
-	if cur >= len(rows) {
-		cur = 0
-	}
-	m.diskTable = table.New(
-		table.WithColumns([]table.Column{
-			{Title: "Database", Width: dbW},
-			{Title: "Table", Width: tableW},
-			{Title: "Disk", Width: diskW},
-			{Title: "Percent", Width: percentW},
-			{Title: "Bytes", Width: bytesW},
-		}),
-		table.WithRows(rows),
-		table.WithFocused(true),
-		table.WithHeight(h),
-	)
-	m.diskTable.SetStyles(tblStyle)
-	m.diskTable.SetCursor(cur)
 }
 
 func (m *Model) refreshDashboard() {
@@ -1022,8 +952,6 @@ func (m *Model) renderHelpBar() string {
 		keys = []string{"↑↓:select", "Enter:detail", "t:truncate", "r:refresh", "Tab:next", "q:quit"}
 	case tabProcesses:
 		keys = []string{"↑↓:scroll", "r:refresh", "Tab:next", "q:quit"}
-	case tabDisk:
-		keys = []string{"↑↓:select", "r:refresh", "Tab:next", "q:quit"}
 	case tabHistory:
 		keys = []string{"↑↓:metric", "←→:period", "r:refresh", "Tab:next", "q:quit"}
 	}
@@ -1128,8 +1056,6 @@ func (m *Model) renderContent() string {
 		return m.fatTable.View()
 	case tabProcesses:
 		return m.procViewport.View()
-	case tabDisk:
-		return m.diskTable.View()
 	case tabHistory:
 		return m.histViewport.View()
 	}

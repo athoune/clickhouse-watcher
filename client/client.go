@@ -420,44 +420,6 @@ func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.Truncat
 	return result, nil
 }
 
-// GetDiskMetrics retrieves disk usage metrics from the daemon.
-func (c *Client) GetDiskMetrics(ctx context.Context) ([]clickhouse.DiskMetric, error) {
-	clientLog.Debug().Msg("Fetching disk metrics")
-
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://unix/api/disks", nil)
-	if err != nil {
-		return nil, err
-	}
-	addVersionHeader(req)
-
-	client := &http.Client{Transport: c.unixTransport()}
-	resp, err := client.Do(req)
-	if err != nil {
-		clientLog.Error().Err(err).Msg("Failed to fetch disk metrics")
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if err := checkVersionError(resp); err != nil {
-		clientLog.Error().Err(err).Msg("Version mismatch")
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		clientLog.Error().Int("status", resp.StatusCode).Msg("Disk metrics request failed")
-		return nil, fmt.Errorf("status: %d", resp.StatusCode)
-	}
-
-	var result []clickhouse.DiskMetric
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		clientLog.Error().Err(err).Msg("Failed to decode disk metrics response")
-		return nil, err
-	}
-
-	clientLog.Debug().Int("count", len(result)).Msg("Disk metrics fetched successfully")
-	return result, nil
-}
-
 // GetSystemStats retrieves system stats (CPU, memory, disk usage) from the daemon.
 func (c *Client) GetSystemStats(ctx context.Context) (*clickhouse.SystemStats, error) {
 	clientLog.Debug().Msg("Fetching system stats")
