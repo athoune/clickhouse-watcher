@@ -757,15 +757,15 @@ func (m *Model) tableWidth() int {
 
 func (m *Model) rebuildFatTable() {
 	w := m.tableWidth()
-	dbW := w / 8
-	nameW := w / 6
-	sizeW := 10
-	rowsW := 12
-	firstW := 12
-	lastW := 12
-	durationW := 10
-	ageW := 8
-	truncW := 11
+	dbW := w / 10
+	nameW := w / 8
+	sizeW := 8
+	rowsW := 10
+	diskW := 8
+	percentW := 8
+	ttlW := 12
+	partitionW := 12
+	truncW := 9
 	h := m.contentHeight() - 2
 	if h < 1 {
 		h = 1
@@ -777,10 +777,21 @@ func (m *Model) rebuildFatTable() {
 		if t.Truncatable {
 			flag = "yes"
 		}
+		ttlDisplay := t.TTL
+		if len(ttlDisplay) > 10 {
+			ttlDisplay = ttlDisplay[:10] + "..."
+		}
+		partitionDisplay := t.PartitionKey
+		if len(partitionDisplay) > 10 {
+			partitionDisplay = partitionDisplay[:10] + "..."
+		}
 		rows = append(rows, table.Row{
 			t.Database, t.Table, t.Size,
 			humanize.Comma(int64(t.Rows)),
-			t.First, t.Last, t.Duration, t.Age,
+			t.DiskName,
+			fmt.Sprintf("%.1f%%", t.Percent),
+			ttlDisplay,
+			partitionDisplay,
 			flag,
 		})
 	}
@@ -793,11 +804,11 @@ func (m *Model) rebuildFatTable() {
 			{Title: "Table", Width: nameW},
 			{Title: "Size", Width: sizeW},
 			{Title: "Rows", Width: rowsW},
-			{Title: "First", Width: firstW},
-			{Title: "Last", Width: lastW},
-			{Title: "Duration", Width: durationW},
-			{Title: "Age", Width: ageW},
-			{Title: "Truncatable", Width: truncW},
+			{Title: "Disk", Width: diskW},
+			{Title: "%", Width: percentW},
+			{Title: "TTL", Width: ttlW},
+			{Title: "Partition", Width: partitionW},
+			{Title: "Trunc", Width: truncW},
 		}),
 		table.WithRows(rows),
 		table.WithFocused(true),
@@ -1193,11 +1204,43 @@ func (m *Model) renderTableDetailContent() string {
 	)
 	b.WriteString(title + "\n\n")
 
+	// Find table info from truncatables cache
+	var tableInfo *clickhouse.TruncatableTable
+	for _, t := range m.truncatables {
+		if t.Database == m.tableDetail.Database && t.Table == m.tableDetail.Name {
+			tableInfo = &t
+			break
+		}
+	}
+
 	type kv struct{ label, value string }
 	fields := []kv{
 		{"Database", m.tableDetail.Database},
 		{"Table", m.tableDetail.Name},
 	}
+
+	if tableInfo != nil {
+		fields = append(fields, kv{"Size", tableInfo.Size})
+		fields = append(fields, kv{"Rows", humanize.Comma(int64(tableInfo.Rows))})
+		fields = append(fields, kv{"Disk", tableInfo.DiskName})
+		fields = append(fields, kv{"Disk %", fmt.Sprintf("%.2f%%", tableInfo.Percent)})
+		fields = append(fields, kv{"First Date", tableInfo.First})
+		fields = append(fields, kv{"Last Date", tableInfo.Last})
+		fields = append(fields, kv{"Duration", tableInfo.Duration})
+		fields = append(fields, kv{"Age", tableInfo.Age})
+		if tableInfo.TTL != "" {
+			fields = append(fields, kv{"TTL", tableInfo.TTL})
+		}
+		if tableInfo.PartitionKey != "" {
+			fields = append(fields, kv{"Partition Key", tableInfo.PartitionKey})
+		}
+		if tableInfo.Truncatable {
+			fields = append(fields, kv{"Truncatable", "Yes"})
+		} else {
+			fields = append(fields, kv{"Truncatable", "No"})
+		}
+	}
+
 	if m.tableDetail.Engine != "" {
 		fields = append(fields, kv{"Engine", m.tableDetail.Engine})
 	}

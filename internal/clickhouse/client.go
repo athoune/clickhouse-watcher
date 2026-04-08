@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/dustin/go-humanize"
 )
 
 type Connection struct {
@@ -53,15 +55,20 @@ type TableDetail struct {
 }
 
 type TruncatableTable struct {
-	Database    string
-	Table       string
-	Rows        uint64
-	Size        string
-	First       string
-	Last        string
-	Duration    string
-	Age         string
-	Truncatable bool
+	Database     string
+	Table        string
+	Rows         uint64
+	Size         string
+	First        string
+	Last         string
+	Duration     string
+	Age          string
+	Truncatable  bool
+	DiskName     string
+	Percent      float64
+	Bytes        uint64
+	TTL          string
+	PartitionKey string
 }
 
 type DiskMetric struct {
@@ -274,20 +281,56 @@ func (c *Client) GetRunningQueries(ctx context.Context) ([]QueryMetric, error) {
 func (c *Client) GetTruncatableTables(ctx context.Context) ([]TruncatableTable, error) {
 	query := `
 SELECT
-    database,
-    "table",
-    size,
-    rows,
-    first,
-    last,
-    duration,
-    age,
-    like(comment, '%It is safe to truncate or drop this table at any time.') AS truncatable
-FROM system.tables AS t
-INNER JOIN
+    concat(size.database,'.', size.table) AS table,
+    size.disk_name,
+    size.percent,
+    size.bytes,
+    ttl.ttl,
+    partition.partition_key,
+    like(comment, '%It is safe to truncate or drop this table at any time.') AS truncatable,
+    p.rows,
+    p.first,
+    p.last,
+    p.duration,
+    p.age
+FROM
 (
     SELECT
-        "table",
+        database,
+        table,
+        disk_name AS disk_name,
+        round((100 * sum(bytes_on_disk)) / median(disks.total_space), 5) AS percent,
+        sum(bytes_on_disk) AS bytes
+    FROM system.parts AS parts
+    INNER JOIN system.disks AS disks ON parts.disk_name = disks.name
+    WHERE active
+    GROUP BY
+        database,
+        table,
+        disk_name
+) AS size
+LEFT JOIN
+(
+    SELECT
+        database,
+        name,
+        trimRight(extractGroups(create_table_query, 'TTL (.*?)( +COMMENT|SETTINGS.*)?;?$')[1]) AS ttl
+    FROM system.tables
+    WHERE (create_table_query LIKE '%TTL %') AND (NOT (create_table_query LIKE '%SYSTEM TTL%'))
+) AS ttl ON (size.database = ttl.database) AND (size.table = ttl.name)
+LEFT JOIN
+(
+    SELECT
+        database,
+        name,
+        partition_key
+    FROM system.tables
+) AS partition ON (size.database = partition.database) AND (size.table = partition.name)
+LEFT JOIN system.tables AS t ON (size.table = t.name) AND (size.database = t.database)
+LEFT JOIN
+(
+    SELECT
+        table,
         database,
         formatReadableSize(sum(bytes)) AS size,
         sum(bytes) AS bytes_raw,
@@ -300,11 +343,10 @@ INNER JOIN
     WHERE active
     GROUP BY
         database,
-        "table"
-    ORDER BY bytes_raw DESC
-    LIMIT 50
-) AS p ON (t."table" = p."table") AND (t.database = p.database)
-ORDER BY p.bytes_raw DESC
+        table
+) AS p ON (size.table = p.table) AND (size.database = p.database)
+ORDER BY size.bytes DESC
+LIMIT 50
 	`
 	rows, err := c.conn.Query(ctx, query)
 	if err != nil {
@@ -315,10 +357,31 @@ ORDER BY p.bytes_raw DESC
 	var tables []TruncatableTable
 	for rows.Next() {
 		var line TruncatableTable
-		err = rows.Scan(&line.Database, &line.Table, &line.Size, &line.Rows, &line.First, &line.Last, &line.Duration, &line.Age, &line.Truncatable)
+		var fullTableName string
+		err = rows.Scan(
+			&fullTableName,
+			&line.DiskName,
+			&line.Percent,
+			&line.Bytes,
+			&line.TTL,
+			&line.PartitionKey,
+			&line.Truncatable,
+			&line.Rows,
+			&line.First,
+			&line.Last,
+			&line.Duration,
+			&line.Age,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan fat table: %w", err)
 		}
+		// Parse database and table from fullTableName
+		parts := strings.SplitN(fullTableName, ".", 2)
+		if len(parts) == 2 {
+			line.Database = parts[0]
+			line.Table = parts[1]
+		}
+		line.Size = humanize.Bytes(line.Bytes)
 		tables = append(tables, line)
 	}
 	return tables, nil
