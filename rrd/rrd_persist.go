@@ -97,7 +97,7 @@ func unixToTime(u int64) time.Time {
 	return time.Unix(u, 0)
 }
 
-// --- helpers d'écriture/lecture binaire little-endian ---
+// --- little-endian binary read/write helpers ---
 
 type binWriter struct {
 	w   io.Writer

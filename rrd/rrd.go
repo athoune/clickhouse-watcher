@@ -8,24 +8,24 @@ import (
 	"time"
 )
 
-// Résolutions
+// Resolutions
 const (
 	ResolutionDay   = 2 * time.Minute
 	ResolutionWeek  = 15 * time.Minute
 	ResolutionMonth = 1 * time.Hour
 
 	SlotsDay   = 720 // 24h / 2min
-	SlotsWeek  = 672 // 7j  / 15min
-	SlotsMonth = 744 // 31j / 1h
+	SlotsWeek  = 672 // 7d  / 15min
+	SlotsMonth = 744 // 31d / 1h
 )
 
-// Ring est un anneau circulaire de mesures horodatées.
-// Stockage binaire compact : 2×8 octets par slot (timestamp int64 + valeur int64).
+// Ring is a circular buffer for timestamped measurements.
+// Compact binary storage: 2×8 bytes per slot (int64 timestamp + int64 value).
 type Ring struct {
-	timestamps []*int64 // nil = slot vide
+	timestamps []*int64 // nil = empty slot
 	values     []int64
 	size       int
-	head       int // prochain slot à écrire
+	head       int // next slot to write
 }
 
 func newRing(size int) *Ring {
@@ -36,7 +36,7 @@ func newRing(size int) *Ring {
 	}
 }
 
-// push insère une valeur. Écrase le slot le plus ancien si l'anneau est plein.
+// push inserts a value. Overwrites the oldest slot if the ring is full.
 func (r *Ring) push(ts time.Time, value int64) {
 	t := ts.Unix()
 	r.timestamps[r.head] = &t
@@ -44,16 +44,16 @@ func (r *Ring) push(ts time.Time, value int64) {
 	r.head = (r.head + 1) % r.size
 }
 
-// Sample est un point de mesure retourné aux appelants.
+// Sample is a measurement point returned to callers.
 type Sample struct {
 	At    time.Time
 	Value int64
 }
 
-// ReadAll retourne les échantillons du plus récent au plus ancien.
+// ReadAll returns samples from most recent to oldest.
 func (r *Ring) ReadAll() []Sample {
 	out := make([]Sample, 0, r.size)
-	// Parcourir en sens inverse pour avoir le plus récent en premier
+	// Traverse in reverse order to get most recent first
 	for i := r.size - 1; i >= 0; i-- {
 		idx := (r.head + i) % r.size
 		if r.timestamps[idx] == nil {
@@ -67,17 +67,17 @@ func (r *Ring) ReadAll() []Sample {
 	return out
 }
 
-// RRD gère les 3 anneaux et leur agrégation automatique.
+// RRD manages the 3 rings and their automatic aggregation.
 type RRD struct {
 	mu   sync.RWMutex
 	day  *Ring
 	week *Ring
 	mon  *Ring
 
-	lastWeek  time.Time // horodatage du dernier agrégat 15min écrit
-	lastMonth time.Time // horodatage du dernier agrégat 1h écrit
+	lastWeek  time.Time // timestamp of last 15min aggregate written
+	lastMonth time.Time // timestamp of last 1h aggregate written
 
-	path string // chemin du fichier de persistance (vide = pas de persistance)
+	path string // persistence file path (empty = no persistence)
 }
 
 func New(persistPath string) (*RRD, error) {
@@ -95,24 +95,24 @@ func New(persistPath string) (*RRD, error) {
 	return rrd, nil
 }
 
-// Record enregistre une nouvelle mesure au moment présent.
-// À appeler toutes les 2 minutes.
+// Record stores a new measurement at the current time.
+// Call every 2 minutes.
 func (rrd *RRD) Record(value int64) error {
 	now := time.Now().Truncate(ResolutionDay)
 
 	rrd.mu.Lock()
 	defer rrd.mu.Unlock()
 
-	// Anneau jour — toujours alimenté
+	// Day ring — always populated
 	rrd.day.push(now, value)
 
-	// Anneau semaine — agrégation toutes les 15 min (on prend la dernière valeur)
+	// Week ring — aggregation every 15 min (takes the last value)
 	if now.Sub(rrd.lastWeek) >= ResolutionWeek {
 		rrd.week.push(now, value)
 		rrd.lastWeek = now
 	}
 
-	// Anneau mois — agrégation toutes les heures
+	// Month ring — aggregation every hour
 	if now.Sub(rrd.lastMonth) >= ResolutionMonth {
 		rrd.mon.push(now, value)
 		rrd.lastMonth = now
@@ -124,21 +124,21 @@ func (rrd *RRD) Record(value int64) error {
 	return nil
 }
 
-// QueryDay retourne les mesures des dernières 24h (résolution 2 min).
+// QueryDay returns measurements for the last 24h (2 min resolution).
 func (rrd *RRD) QueryDay() []Sample {
 	rrd.mu.RLock()
 	defer rrd.mu.RUnlock()
 	return rrd.day.ReadAll()
 }
 
-// QueryWeek retourne les mesures des 7 derniers jours (résolution 15 min).
+// QueryWeek returns measurements for the last 7 days (15 min resolution).
 func (rrd *RRD) QueryWeek() []Sample {
 	rrd.mu.RLock()
 	defer rrd.mu.RUnlock()
 	return rrd.week.ReadAll()
 }
 
-// QueryMonth retourne les mesures du dernier mois (résolution 1h).
+// QueryMonth returns measurements for the last month (1h resolution).
 func (rrd *RRD) QueryMonth() []Sample {
 	rrd.mu.RLock()
 	defer rrd.mu.RUnlock()

@@ -438,7 +438,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tab = (m.tab + 1) % len(tabNames)
 		m.ttlInput.Blur()
 		uiLog.Debug().Str("tab", tabNames[m.tab]).Msg("Switched tab")
-		// Charger les données immédiatement quand on arrive sur l'onglet History
+		// Load data immediately when switching to History tab
 		if m.tab == tabHistory {
 			return m, m.cmdFetchHistory()
 		}
@@ -546,7 +546,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.actionMsg = "Table not marked as safe to truncate"
 				return m, nil
 			}
-			// Afficher immédiatement la modale (pas de commande async)
+			// Display modal immediately (no async command)
 			m.confirmingAction = "truncate"
 			m.confirmDatabase = t.Database
 			m.confirmTable = t.Table
