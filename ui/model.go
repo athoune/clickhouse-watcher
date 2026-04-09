@@ -518,6 +518,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.histScrollOffset = 0
 			return m, nil
 		}
+	case "m":
+		if m.tab == tabHistory {
+			// Cycle through metrics
+			m.histMetricIdx = (m.histMetricIdx + 1) % len(historyMetrics)
+			m.histScrollOffset = 0
+			return m, m.cmdFetchHistory()
+		}
 	case "r":
 		uiLog.Debug().Str("tab", tabNames[m.tab]).Msg("Manual refresh triggered")
 		return m, m.cmdRefresh()
@@ -1033,7 +1040,7 @@ func (m *Model) renderHelpBar() string {
 	case tabProcesses:
 		keys = []string{"↑↓:scroll", "r:refresh", "Tab:next", "q:quit"}
 	case tabHistory:
-		keys = []string{"↑↓:scroll", "←→:period", "+/-:zoom", "g:top", "r:refresh", "Tab:next", "q:quit"}
+		keys = []string{"↑↓:scroll", "←→:period", "m:metric", "+/-:zoom", "g:top", "r:refresh", "Tab:next", "q:quit"}
 	}
 
 	var b strings.Builder
