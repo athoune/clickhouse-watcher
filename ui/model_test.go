@@ -289,28 +289,50 @@ func TestHistoryPeriodCyclesLeft(t *testing.T) {
 	}
 }
 
-func TestHistoryMetricCyclesDown(t *testing.T) {
+func TestHistoryScrollDown(t *testing.T) {
 	m := newTestModel()
 	m.tab = tabHistory
-	initial := m.histMetricIdx
+	m.historyData = make([]rrd.Sample, 100) // Create dummy data
+	m.histScrollOffset = 0
 
 	m = sendKey(m, tea.KeyDown)
-	expected := (initial + 1) % len(historyMetrics)
-	if m.histMetricIdx != expected {
-		t.Errorf("expected metric index %d after ↓, got %d", expected, m.histMetricIdx)
+	if m.histScrollOffset != 1 {
+		t.Errorf("expected scroll offset 1 after ↓, got %d", m.histScrollOffset)
 	}
 }
 
-func TestHistoryMetricCyclesUp(t *testing.T) {
+func TestHistoryScrollUp(t *testing.T) {
 	m := newTestModel()
 	m.tab = tabHistory
-	initial := m.histMetricIdx
+	m.historyData = make([]rrd.Sample, 100)
+	m.histScrollOffset = 5
 
-	// Wrap: 0 → last
 	m = sendKey(m, tea.KeyUp)
-	expected := (initial - 1 + len(historyMetrics)) % len(historyMetrics)
-	if m.histMetricIdx != expected {
-		t.Errorf("expected metric index %d after ↑, got %d", expected, m.histMetricIdx)
+	if m.histScrollOffset != 4 {
+		t.Errorf("expected scroll offset 4 after ↑, got %d", m.histScrollOffset)
+	}
+}
+
+func TestHistoryScrollUpStopsAtZero(t *testing.T) {
+	m := newTestModel()
+	m.tab = tabHistory
+	m.historyData = make([]rrd.Sample, 100)
+	m.histScrollOffset = 0
+
+	m = sendKey(m, tea.KeyUp)
+	if m.histScrollOffset != 0 {
+		t.Errorf("expected scroll offset to stay at 0, got %d", m.histScrollOffset)
+	}
+}
+
+func TestHistoryGoToTop(t *testing.T) {
+	m := newTestModel()
+	m.tab = tabHistory
+	m.histScrollOffset = 50
+
+	m = sendRune(m, 'g')
+	if m.histScrollOffset != 0 {
+		t.Errorf("expected scroll offset 0 after 'g', got %d", m.histScrollOffset)
 	}
 }
 

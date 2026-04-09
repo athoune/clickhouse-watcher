@@ -216,8 +216,10 @@ type Model struct {
 	actionMsg   string
 
 	// history navigation
-	histMetricIdx int
-	histPeriodIdx int
+	histMetricIdx    int
+	histPeriodIdx    int
+	histResolution   int // resolution in minutes: 2, 4, 8, 16, 32, 60, 120
+	histScrollOffset int // scroll offset for history table
 
 	// processes auto-refresh
 	procRefreshAt time.Time
@@ -247,11 +249,13 @@ func New(socketPath string) *Model {
 	ti.TextStyle = lipgloss.NewStyle().Foreground(clrText)
 
 	return &Model{
-		tab:      tabDashboard,
-		daemon:   client.NewClient(socketPath),
-		spinner:  sp,
-		loading:  true,
-		ttlInput: ti,
+		tab:              tabDashboard,
+		daemon:           client.NewClient(socketPath),
+		spinner:          sp,
+		loading:          true,
+		ttlInput:         ti,
+		histResolution:   2, // default resolution: 2 minutes
+		histScrollOffset: 0,
 	}
 }
 
@@ -457,19 +461,63 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyUp:
 		if m.tab == tabHistory {
-			m.histMetricIdx = (m.histMetricIdx - 1 + len(historyMetrics)) % len(historyMetrics)
-			return m, m.cmdFetchHistory()
+			// Scroll up in history table
+			if m.histScrollOffset > 0 {
+				m.histScrollOffset--
+			}
+			return m, nil
 		}
 	case tea.KeyDown:
 		if m.tab == tabHistory {
-			m.histMetricIdx = (m.histMetricIdx + 1) % len(historyMetrics)
-			return m, m.cmdFetchHistory()
+			// Scroll down in history table
+			maxOffset := len(m.historyData) - m.contentHeight() + 4
+			if maxOffset < 0 {
+				maxOffset = 0
+			}
+			if m.histScrollOffset < maxOffset {
+				m.histScrollOffset++
+			}
+			return m, nil
 		}
 	}
 
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
+	case "+", "=":
+		if m.tab == tabHistory {
+			// Zoom in: decrease resolution (fewer minutes per sample)
+			// Check if we can fit all data at current resolution
+			availableLines := m.contentHeight() - 4
+			dataPoints := m.getHistoryDataPoints()
+			if dataPoints > availableLines && m.histResolution > 2 {
+				m.histResolution = m.histResolution / 2
+				if m.histResolution < 2 {
+					m.histResolution = 2
+				}
+				m.histScrollOffset = 0
+				return m, m.cmdFetchHistory()
+			}
+		}
+	case "-":
+		if m.tab == tabHistory {
+			// Zoom out: increase resolution (more minutes per sample)
+			maxResolution := m.getMaxResolutionForPeriod()
+			if m.histResolution < maxResolution {
+				m.histResolution = m.histResolution * 2
+				if m.histResolution > maxResolution {
+					m.histResolution = maxResolution
+				}
+				m.histScrollOffset = 0
+				return m, m.cmdFetchHistory()
+			}
+		}
+	case "g", "G":
+		if m.tab == tabHistory {
+			// Go to top of history table
+			m.histScrollOffset = 0
+			return m, nil
+		}
 	case "r":
 		uiLog.Debug().Str("tab", tabNames[m.tab]).Msg("Manual refresh triggered")
 		return m, m.cmdRefresh()
@@ -598,13 +646,45 @@ func (m *Model) cmdFetchSystemStats() tea.Cmd {
 func (m *Model) cmdFetchHistory() tea.Cmd {
 	metric := historyMetrics[m.histMetricIdx]
 	period := historyPeriods[m.histPeriodIdx]
+	resolution := m.histResolution
 	return func() tea.Msg {
-		samples, err := m.daemon.GetHistory(metric, period)
+		samples, err := m.daemon.GetHistoryWithResolution(metric, period, resolution)
 		if err != nil {
 			return errMsg{err}
 		}
 		return historyMsg{samples}
 	}
+}
+
+// getHistoryDataPoints returns the number of data points for current settings
+func (m *Model) getHistoryDataPoints() int {
+	period := historyPeriods[m.histPeriodIdx]
+	resolution := m.histResolution
+
+	switch period {
+	case "day":
+		return (24 * 60) / resolution // 24 hours in minutes / resolution
+	case "week":
+		return (7 * 24 * 60) / resolution // 7 days in minutes / resolution
+	case "month":
+		return (31 * 24 * 60) / resolution // 31 days in minutes / resolution
+	}
+	return 0
+}
+
+// getMaxResolutionForPeriod returns the maximum resolution for the current period
+func (m *Model) getMaxResolutionForPeriod() int {
+	period := historyPeriods[m.histPeriodIdx]
+
+	switch period {
+	case "day":
+		return 120 // 2 hours max for day view
+	case "week":
+		return 480 // 8 hours max for week view
+	case "month":
+		return 1440 // 24 hours max for month view
+	}
+	return 120
 }
 
 func (m *Model) cmdRefresh() tea.Cmd {
@@ -953,7 +1033,7 @@ func (m *Model) renderHelpBar() string {
 	case tabProcesses:
 		keys = []string{"↑↓:scroll", "r:refresh", "Tab:next", "q:quit"}
 	case tabHistory:
-		keys = []string{"↑↓:metric", "←→:period", "r:refresh", "Tab:next", "q:quit"}
+		keys = []string{"↑↓:scroll", "←→:period", "+/-:zoom", "g:top", "r:refresh", "Tab:next", "q:quit"}
 	}
 
 	var b strings.Builder
@@ -1251,10 +1331,14 @@ func (m *Model) renderHistoryContent() string {
 	title := sectionStyle.Width(m.width - 2).Render(" Metrics History")
 	b.WriteString(title + "\n\n")
 
-	// Selector row
+	// Selector row with resolution info
 	b.WriteString(renderSelector("Metric", historyMetrics, m.histMetricIdx))
 	b.WriteString(renderSelector("Period", historyPeriods, m.histPeriodIdx))
-	b.WriteString("\n")
+
+	// Show current resolution
+	resLabel := fmt.Sprintf("%dmin", m.histResolution)
+	b.WriteString(labelStyle.Render(fmt.Sprintf("  %-8s", "Res:")))
+	b.WriteString(activeTabStyle.Render(" "+resLabel+" ") + "\n\n")
 
 	if len(m.historyData) == 0 {
 		b.WriteString(mutedStyle.Render("  No historical data yet — collected every 2 minutes.") + "\n")
@@ -1285,7 +1369,26 @@ func (m *Model) renderHistoryContent() string {
 		"Timestamp", "Value", strings.Repeat("▒", barW))))
 	b.WriteString(mutedStyle.Render("  " + strings.Repeat("─", 20+2+20+2+barW) + "\n"))
 
-	for _, s := range m.historyData {
+	// Calculate visible range based on scroll offset and terminal height
+	availableLines := m.contentHeight() - 8 // header + selectors + sparkline + borders
+	if availableLines < 5 {
+		availableLines = 5
+	}
+
+	startIdx := m.histScrollOffset
+	endIdx := startIdx + availableLines
+	if endIdx > len(m.historyData) {
+		endIdx = len(m.historyData)
+	}
+
+	// Show scroll indicator if needed
+	if len(m.historyData) > availableLines {
+		scrollInfo := fmt.Sprintf("  Showing %d-%d of %d (scroll with ↑↓)", startIdx+1, endIdx, len(m.historyData))
+		b.WriteString(mutedStyle.Render(scrollInfo) + "\n")
+	}
+
+	for i := startIdx; i < endIdx && i < len(m.historyData); i++ {
+		s := m.historyData[i]
 		val := formatHistoryValue(metric, s.Value)
 		bar := sparkBar(s.Value, maxVal, barW)
 		b.WriteString(

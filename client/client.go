@@ -382,6 +382,68 @@ func (c *Client) GetHistory(metric, period string) ([]rrd.Sample, error) {
 	return result, nil
 }
 
+// GetHistoryWithResolution retrieves historical data and aggregates it to the desired resolution.
+// The RRD stores data at fixed resolutions (day=2min, week=15min, month=1h).
+// This function aggregates data if a coarser resolution is requested.
+func (c *Client) GetHistoryWithResolution(metric, period string, resolutionMinutes int) ([]rrd.Sample, error) {
+	// Get base data at the finest resolution available for the period
+	baseData, err := c.GetHistory(metric, period)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(baseData) == 0 {
+		return baseData, nil
+	}
+
+	// Determine base resolution from period
+	baseResolution := 2 // day: 2 minutes
+	if period == "week" {
+		baseResolution = 15 // week: 15 minutes
+	} else if period == "month" {
+		baseResolution = 60 // month: 1 hour
+	}
+
+	// If requested resolution is finer or equal, return as-is
+	if resolutionMinutes <= baseResolution {
+		return baseData, nil
+	}
+
+	// Aggregate data: group samples by time windows
+	windowSize := resolutionMinutes / baseResolution
+	if windowSize < 2 {
+		return baseData, nil
+	}
+
+	var aggregated []rrd.Sample
+	for i := 0; i < len(baseData); i += windowSize {
+		end := i + windowSize
+		if end > len(baseData) {
+			end = len(baseData)
+		}
+
+		// Calculate average value for this window
+		var sum int64
+		for j := i; j < end; j++ {
+			sum += baseData[j].Value
+		}
+		avg := sum / int64(end-i)
+
+		// Use the middle timestamp of the window
+		midIdx := i + (end-i)/2
+		if midIdx >= len(baseData) {
+			midIdx = len(baseData) - 1
+		}
+
+		aggregated = append(aggregated, rrd.Sample{
+			At:    baseData[midIdx].At,
+			Value: avg,
+		})
+	}
+
+	return aggregated, nil
+}
+
 // GetTruncatableTables retrieves tables with their size and truncatability info.
 func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.TruncatableTable, error) {
 	clientLog.Debug().Msg("Fetching truncatable tables")
