@@ -74,6 +74,33 @@ install-systemd: install
 	@systemd-tmpfiles --create
 	@echo "Systemd files installed. Run: sudo systemctl enable --now clickhouse-watcherd"
 
+# Cross-compilation targets
+PLATFORMS=darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+
+build-all: $(PLATFORMS)
+
+$(PLATFORMS):
+	@echo "Building for $@..."
+	@mkdir -p $(DIST_DIR)/$@
+	GOOS=$(word 1,$(subst /, ,$@)) GOARCH=$(word 2,$(subst /, ,$@)) \
+		$(GOBUILD) -o $(DIST_DIR)/$@/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
+	GOOS=$(word 1,$(subst /, ,$@)) GOARCH=$(word 2,$(subst /, ,$@)) \
+		$(GOBUILD) -o $(DIST_DIR)/$@/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+
+dist: build-all
+	@echo "Creating distribution archives..."
+	@mkdir -p $(DIST_DIR)/archives
+	@for platform in $(PLATFORMS); do \
+		os=$$(echo $$platform | cut -d'/' -f1); \
+		arch=$$(echo $$platform | cut -d'/' -f2); \
+		tar -czf $(DIST_DIR)/archives/clickhouse-watcher-$(GIT_VERSION)-$${os}-$${arch}.tar.gz \
+			-C $(DIST_DIR)/$$platform $(BINARY_DAEMON) $(BINARY_CLIENT); \
+		echo "Created: $(DIST_DIR)/archives/clickhouse-watcher-$(GIT_VERSION)-$${os}-$${arch}.tar.gz"; \
+	done
+
+dist-clean: clean
+	@rm -rf $(DIST_DIR)
+
 run-daemon: build-daemon
 	@echo "Starting daemon..."
 	@$(BUILD_DIR)/$(BINARY_DAEMON)
