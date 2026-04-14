@@ -111,8 +111,18 @@ DEB_ARCH_ARM64=arm64
 
 deb: deb-amd64 deb-arm64
 
-deb-from-docker:
-	docker run -ti --rm -u `id -u`:`id -u` -v `pwd`:/usr/src -w /usr/src golang:1.26-trixie make deb
+deb-from-docker: .cache-go
+	@echo "Building Debian packages in Docker with cache persistence..."
+	docker run -ti --rm \
+		-u `id -u`:`id -g` \
+		-v `pwd`:/usr/src \
+		-v `pwd`/.cache-go:/go/cache \
+		-w /usr/src \
+		-e GOCACHE=/go/cache \
+		-e GOMODCACHE=/go/cache/mod \
+		-e HOME=/tmp \
+		golang:1.26-trixie \
+		make deb
 
 deb-amd64: build-linux-amd64
 	@echo "Creating Debian package for amd64..."
@@ -201,14 +211,14 @@ deb-arm64: build-linux-arm64
 build-linux-amd64: .cache-go
 	@echo "Building for linux/amd64..."
 	@mkdir -p $(DIST_DIR)/linux/amd64
-	GOCACHE=`pwd`/.cache-go GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
-	GOCACHE=`pwd`/.cache-go GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
 
 build-linux-arm64: .cache-go
 	@echo "Building for linux/arm64..."
 	@mkdir -p $(DIST_DIR)/linux/arm64
-	GOCACHE=`pwd`/.cache-go GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
-	GOCACHE=`pwd`/.cache-go GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
 
 run-daemon: build-daemon
 	@echo "Starting daemon..."
