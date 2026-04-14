@@ -141,6 +141,7 @@ deb-amd64: build-linux-amd64
 	@cp $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(DIST_DIR)/deb/amd64/usr/local/bin/
 	@cp systemd/clickhouse-watcherd.service $(DIST_DIR)/deb/amd64/etc/systemd/system/
 	@cp systemd/clickhouse-watcherd.conf $(DIST_DIR)/deb/amd64/etc/tmpfiles.d/
+	@cp config.yaml.example $(DIST_DIR)/deb/amd64/etc/clickhouse-watcher/config.yaml
 	@echo "Package: clickhouse-watcher" > $(DIST_DIR)/deb/amd64/DEBIAN/control
 	@echo "Version: $(DEB_VERSION)" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
 	@echo "Section: utils" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
@@ -150,6 +151,7 @@ deb-amd64: build-linux-amd64
 	@echo "Description: ClickHouse Watcher - Monitor and manage ClickHouse clusters" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
 	@echo " ClickHouse Watcher provides a TUI interface to monitor ClickHouse" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
 	@echo " metrics, tables, processes, and manage TTL and truncation." >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo "/etc/clickhouse-watcher/config.yaml" > $(DIST_DIR)/deb/amd64/DEBIAN/conffiles
 	@echo "#!/bin/bash" > $(DIST_DIR)/deb/amd64/DEBIAN/postinst
 	@echo "set -e" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
 	@echo "# Create system user if it doesn't exist" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
@@ -183,6 +185,7 @@ deb-arm64: build-linux-arm64
 	@cp $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(DIST_DIR)/deb/arm64/usr/local/bin/
 	@cp systemd/clickhouse-watcherd.service $(DIST_DIR)/deb/arm64/etc/systemd/system/
 	@cp systemd/clickhouse-watcherd.conf $(DIST_DIR)/deb/arm64/etc/tmpfiles.d/
+	@cp config.yaml.example $(DIST_DIR)/deb/arm64/etc/clickhouse-watcher/config.yaml
 	@echo "Package: clickhouse-watcher" > $(DIST_DIR)/deb/arm64/DEBIAN/control
 	@echo "Version: $(DEB_VERSION)" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
 	@echo "Section: utils" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
@@ -192,6 +195,7 @@ deb-arm64: build-linux-arm64
 	@echo "Description: ClickHouse Watcher - Monitor and manage ClickHouse clusters" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
 	@echo " ClickHouse Watcher provides a TUI interface to monitor ClickHouse" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
 	@echo " metrics, tables, processes, and manage TTL and truncation." >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo "/etc/clickhouse-watcher/config.yaml" > $(DIST_DIR)/deb/arm64/DEBIAN/conffiles
 	@echo "#!/bin/bash" > $(DIST_DIR)/deb/arm64/DEBIAN/postinst
 	@echo "set -e" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
 	@echo "# Create system user if it doesn't exist" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst

@@ -1,0 +1,17 @@
+# ClickHouse Watcher Configuration
+# Place this file at /etc/clickhouse-watcher/config.yaml
+
+connections:
+  local:
+    name: "Local ClickHouse"
+    host: "localhost"
+    port: 9000
+    database: "default"
+    username: "default"
+    password: ""
+
+# Logging configuration (optional)
+# log:
+#   level: "info"    # debug, info, warn, error
+#   path: ""         # empty = stderr, or specify file path
+#   pretty: false    # true for human-readable format
