@@ -24,4 +24,7 @@ clickhouse-watcher
 # Config (local overrides)
 config.local.yaml
 config.yaml
+
+# Build folders
 build
+dist
