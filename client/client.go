@@ -18,6 +18,12 @@ import (
 
 var clientLog = logger.WithComponent("client")
 
+var default_path = "/tmp/clickhouse-watcher.sock"
+
+func DefaultPath() string {
+	return default_path
+}
+
 // Client communicates with the daemon via HTTP over Unix socket.
 type Client struct {
 	socketPath string

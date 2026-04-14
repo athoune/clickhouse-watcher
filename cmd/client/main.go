@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/athoune/clickhouse-watcher/client"
 	"github.com/athoune/clickhouse-watcher/config"
 	"github.com/athoune/clickhouse-watcher/logger"
 	"github.com/athoune/clickhouse-watcher/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-const socketPath = "/tmp/clickhouse-watcher.sock"
 
 func main() {
 	// Load configuration first
@@ -47,9 +46,9 @@ func main() {
 	}
 
 	log := logger.WithComponent("client-main")
-	log.Info().Str("socket", socketPath).Msg("Starting clickhouse-watch client")
+	log.Info().Str("socket", client.DefaultPath()).Msg("Starting clickhouse-watch client")
 
-	m := ui.New(socketPath)
+	m := ui.New(client.DefaultPath())
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

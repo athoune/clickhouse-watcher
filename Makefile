@@ -13,7 +13,11 @@ GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
 GOCLEAN=$(GOCMD) clean
 GOMOD=$(GOCMD) mod
-GOFLAGS=-ldflags "-X github.com/athoune/clickhouse-watcher/version.version=$(GIT_VERSION)"
+ifeq ($(SOCKET_PATH), '')
+	GOFLAGS=-ldflags "-X github.com/athoune/clickhouse-watcher/version.version=$(GIT_VERSION)"
+else
+	GOFLAGS=-ldflags "-X github.com/athoune/clickhouse-watcher/version.version=$(GIT_VERSION) -X github.com/athoune/clickhouse-watcher/client.default_path=$(SOCKET_PATH)"
+endif
 
 all: test build
 
@@ -121,6 +125,7 @@ deb-from-docker: .cache-go
 		-e GOCACHE=/go/cache \
 		-e GOMODCACHE=/go/cache/mod \
 		-e HOME=/tmp \
+		-e SOCKET_PATH=/run/clickhouse-watcher/clickhouse-watcher.sock \
 		golang:1.26-trixie \
 		make deb
 
