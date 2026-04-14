@@ -101,6 +101,107 @@ dist: build-all
 dist-clean: clean
 	@rm -rf $(DIST_DIR)
 
+# Debian/Ubuntu package creation
+DEB_VERSION=$(shell echo $(GIT_VERSION) | sed 's/^v//')
+DEB_ARCH_AMD64=amd64
+DEB_ARCH_ARM64=arm64
+
+deb: deb-amd64 deb-arm64
+
+deb-amd64: build-linux-amd64
+	@echo "Creating Debian package for amd64..."
+	@mkdir -p $(DIST_DIR)/deb/amd64/DEBIAN
+	@mkdir -p $(DIST_DIR)/deb/amd64/usr/local/bin
+	@mkdir -p $(DIST_DIR)/deb/amd64/etc/clickhouse-watcher
+	@mkdir -p $(DIST_DIR)/deb/amd64/etc/systemd/system
+	@mkdir -p $(DIST_DIR)/deb/amd64/etc/tmpfiles.d
+	@mkdir -p $(DIST_DIR)/deb/amd64/var/lib/clickhouse-watcher
+	@cp $(DIST_DIR)/linux/amd64/$(BINARY_DAEMON) $(DIST_DIR)/deb/amd64/usr/local/bin/
+	@cp $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(DIST_DIR)/deb/amd64/usr/local/bin/
+	@cp systemd/clickhouse-watcherd.service $(DIST_DIR)/deb/amd64/etc/systemd/system/
+	@cp systemd/clickhouse-watcherd.conf $(DIST_DIR)/deb/amd64/etc/tmpfiles.d/
+	@echo "Package: clickhouse-watcher" > $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo "Version: $(DEB_VERSION)" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo "Section: utils" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo "Priority: optional" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo "Architecture: $(DEB_ARCH_AMD64)" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo "Maintainer: Mathieu Lecarme <mathieu@garambrogne.net>" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo "Description: ClickHouse Watcher - Monitor and manage ClickHouse clusters" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo " ClickHouse Watcher provides a TUI interface to monitor ClickHouse" >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo " metrics, tables, processes, and manage TTL and truncation." >> $(DIST_DIR)/deb/amd64/DEBIAN/control
+	@echo "#!/bin/bash" > $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "set -e" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "# Create system user if it doesn't exist" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "if ! id -u clickhouse_watcher >/dev/null 2>&1; then" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "    useradd --system --home-dir /var/lib/clickhouse-watcher --shell /usr/sbin/nologin clickhouse_watcher" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "fi" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "# Create group if it doesn't exist" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "if ! getent group clickhouse_watcherd >/dev/null 2>&1; then" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "    groupadd --system clickhouse_watcherd" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "fi" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "# Set permissions" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "chown -R clickhouse_watcher:clickhouse_watcherd /var/lib/clickhouse-watcher" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "chmod 750 /var/lib/clickhouse-watcher" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "# Reload systemd" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "systemctl daemon-reload" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@echo "systemd-tmpfiles --create" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@chmod 755 $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@dpkg-deb --build $(DIST_DIR)/deb/amd64 $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_AMD64).deb
+	@echo "Created: $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_AMD64).deb"
+
+deb-arm64: build-linux-arm64
+	@echo "Creating Debian package for arm64..."
+	@mkdir -p $(DIST_DIR)/deb/arm64/DEBIAN
+	@mkdir -p $(DIST_DIR)/deb/arm64/usr/local/bin
+	@mkdir -p $(DIST_DIR)/deb/arm64/etc/clickhouse-watcher
+	@mkdir -p $(DIST_DIR)/deb/arm64/etc/systemd/system
+	@mkdir -p $(DIST_DIR)/deb/arm64/etc/tmpfiles.d
+	@mkdir -p $(DIST_DIR)/deb/arm64/var/lib/clickhouse-watcher
+	@cp $(DIST_DIR)/linux/arm64/$(BINARY_DAEMON) $(DIST_DIR)/deb/arm64/usr/local/bin/
+	@cp $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(DIST_DIR)/deb/arm64/usr/local/bin/
+	@cp systemd/clickhouse-watcherd.service $(DIST_DIR)/deb/arm64/etc/systemd/system/
+	@cp systemd/clickhouse-watcherd.conf $(DIST_DIR)/deb/arm64/etc/tmpfiles.d/
+	@echo "Package: clickhouse-watcher" > $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo "Version: $(DEB_VERSION)" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo "Section: utils" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo "Priority: optional" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo "Architecture: $(DEB_ARCH_ARM64)" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo "Maintainer: Mathieu Lecarme <mathieu@garambrogne.net>" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo "Description: ClickHouse Watcher - Monitor and manage ClickHouse clusters" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo " ClickHouse Watcher provides a TUI interface to monitor ClickHouse" >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo " metrics, tables, processes, and manage TTL and truncation." >> $(DIST_DIR)/deb/arm64/DEBIAN/control
+	@echo "#!/bin/bash" > $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "set -e" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "# Create system user if it doesn't exist" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "if ! id -u clickhouse_watcher >/dev/null 2>&1; then" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "    useradd --system --home-dir /var/lib/clickhouse-watcher --shell /usr/sbin/nologin clickhouse_watcher" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "fi" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "# Create group if it doesn't exist" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "if ! getent group clickhouse_watcherd >/dev/null 2>&1; then" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "    groupadd --system clickhouse_watcherd" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "fi" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "# Set permissions" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "chown -R clickhouse_watcher:clickhouse_watcherd /var/lib/clickhouse-watcher" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "chmod 750 /var/lib/clickhouse-watcher" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "# Reload systemd" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "systemctl daemon-reload" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@echo "systemd-tmpfiles --create" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@chmod 755 $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@dpkg-deb --build $(DIST_DIR)/deb/arm64 $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_ARM64).deb
+	@echo "Created: $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_ARM64).deb"
+
+build-linux-amd64:
+	@echo "Building for linux/amd64..."
+	@mkdir -p $(DIST_DIR)/linux/amd64
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+
+build-linux-arm64:
+	@echo "Building for linux/arm64..."
+	@mkdir -p $(DIST_DIR)/linux/arm64
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+
 run-daemon: build-daemon
 	@echo "Starting daemon..."
 	@$(BUILD_DIR)/$(BINARY_DAEMON)
