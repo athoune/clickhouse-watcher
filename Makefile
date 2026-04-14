@@ -17,6 +17,9 @@ GOFLAGS=-ldflags "-X github.com/athoune/clickhouse-watcher/version.version=$(GIT
 
 all: test build
 
+.cache-go:
+	mkdir .cache-go
+
 build: build-daemon build-client
 
 build-daemon:
@@ -195,17 +198,17 @@ deb-arm64: build-linux-arm64
 	@dpkg-deb --build $(DIST_DIR)/deb/arm64 $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_ARM64).deb
 	@echo "Created: $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_ARM64).deb"
 
-build-linux-amd64:
+build-linux-amd64: .cache-go
 	@echo "Building for linux/amd64..."
 	@mkdir -p $(DIST_DIR)/linux/amd64
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+	GOCACHE=`pwd`/.cache-go GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
+	GOCACHE=`pwd`/.cache-go GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
 
-build-linux-arm64:
+build-linux-arm64: .cache-go
 	@echo "Building for linux/arm64..."
 	@mkdir -p $(DIST_DIR)/linux/arm64
-	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
-	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+	GOCACHE=`pwd`/.cache-go GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
+	GOCACHE=`pwd`/.cache-go GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
 
 run-daemon: build-daemon
 	@echo "Starting daemon..."
