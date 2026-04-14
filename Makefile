@@ -112,7 +112,7 @@ DEB_ARCH_ARM64=arm64
 deb: deb-amd64 deb-arm64
 
 deb-from-docker:
-	docker run -ti --rm -v `pwd`:/usr/src -w /usr/src golang:1.26-trixie make deb
+	docker run -ti --rm -u `id -u`:`id -u` -v `pwd`:/usr/src -w /usr/src golang:1.26-trixie make deb
 
 deb-amd64: build-linux-amd64
 	@echo "Creating Debian package for amd64..."
