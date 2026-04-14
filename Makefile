@@ -149,6 +149,7 @@ deb-amd64: build-linux-amd64
 	@echo "systemctl daemon-reload" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
 	@echo "systemd-tmpfiles --create" >> $(DIST_DIR)/deb/amd64/DEBIAN/postinst
 	@chmod 755 $(DIST_DIR)/deb/amd64/DEBIAN/postinst
+	@mkdir -p $(DIST_DIR)/archives
 	@dpkg-deb --build $(DIST_DIR)/deb/amd64 $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_AMD64).deb
 	@echo "Created: $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_AMD64).deb"
 
@@ -190,6 +191,7 @@ deb-arm64: build-linux-arm64
 	@echo "systemctl daemon-reload" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
 	@echo "systemd-tmpfiles --create" >> $(DIST_DIR)/deb/arm64/DEBIAN/postinst
 	@chmod 755 $(DIST_DIR)/deb/arm64/DEBIAN/postinst
+	@mkdir -p $(DIST_DIR)/archives
 	@dpkg-deb --build $(DIST_DIR)/deb/arm64 $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_ARM64).deb
 	@echo "Created: $(DIST_DIR)/archives/clickhouse-watcher_$(DEB_VERSION)_$(DEB_ARCH_ARM64).deb"
 
