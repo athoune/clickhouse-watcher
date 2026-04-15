@@ -37,8 +37,7 @@ jobs:
             ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-darwin-arm64.tar.gz
             ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-linux-amd64.tar.gz
             ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-linux-arm64.tar.gz
-            ./dist/archives/clickhouse-watcher_${{ github.ref_name }}_amd64.deb
-            ./dist/archives/clickhouse-watcher_${{ github.ref_name }}_arm64.deb
+            ./dist/archives/*.deb
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
