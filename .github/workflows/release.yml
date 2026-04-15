@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "V*"
 
 permissions:
   contents: write
@@ -23,78 +24,21 @@ jobs:
       - name: Build all platforms
         run: make dist
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-
-      - name: Upload macOS AMD64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-darwin-amd64.tar.gz
-          asset_name: clickhouse-watcher-${{ github.ref_name }}-darwin-amd64.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload macOS ARM64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-darwin-arm64.tar.gz
-          asset_name: clickhouse-watcher-${{ github.ref_name }}-darwin-arm64.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload Linux AMD64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-linux-amd64.tar.gz
-          asset_name: clickhouse-watcher-${{ github.ref_name }}-linux-amd64.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload Linux ARM64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-linux-arm64.tar.gz
-          asset_name: clickhouse-watcher-${{ github.ref_name }}-linux-arm64.tar.gz
-          asset_content_type: application/gzip
-
       - name: Build Debian packages
         env:
           SOCKET_PATH: /run/clickhouse-watcher/clickhouse-watcher.sock
         run: make deb
 
-      - name: Upload Debian AMD64
-        uses: actions/upload-release-asset@v1
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-darwin-amd64.tar.gz
+            ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-darwin-arm64.tar.gz
+            ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-linux-amd64.tar.gz
+            ./dist/archives/clickhouse-watcher-${{ github.ref_name }}-linux-arm64.tar.gz
+            ./dist/archives/clickhouse-watcher_${{ github.ref_name }}_amd64.deb
+            ./dist/archives/clickhouse-watcher_${{ github.ref_name }}_arm64.deb
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/archives/clickhouse-watcher_${{ github.ref_name }}_amd64.deb
-          asset_name: clickhouse-watcher_${{ github.ref_name }}_amd64.deb
-          asset_content_type: application/vnd.debian.binary-package
-
-      - name: Upload Debian ARM64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/archives/clickhouse-watcher_${{ github.ref_name }}_arm64.deb
-          asset_name: clickhouse-watcher_${{ github.ref_name }}_arm64.deb
-          asset_content_type: application/vnd.debian.binary-package
