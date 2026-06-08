@@ -27,6 +27,7 @@ func DefaultPath() string {
 // Client communicates with the daemon via HTTP over Unix socket.
 type Client struct {
 	socketPath string
+	transport  http.RoundTripper
 }
 
 // NewClient creates a client that connects to the daemon at the given socket path.
@@ -37,8 +38,30 @@ func NewClient(socketPath string) *Client {
 	}
 }
 
+// NewClientWithTransport creates a client that uses a custom HTTP transport.
+// This is used in standalone mode to route requests directly to the daemon
+// handler without going through a Unix socket.
+func NewClientWithTransport(rt http.RoundTripper) *Client {
+	clientLog.Debug().Msg("Creating new client with custom transport")
+	return &Client{
+		transport: rt,
+	}
+}
+
+// getTransport returns the configured transport or falls back to the Unix socket transport.
+func (c *Client) getTransport() http.RoundTripper {
+	if c.transport != nil {
+		return c.transport
+	}
+	return c.unixTransport()
+}
+
 // SocketPath returns the Unix socket path used for connections.
+// In standalone mode this returns "embedded" since there is no socket.
 func (c *Client) SocketPath() string {
+	if c.socketPath == "" {
+		return "embedded"
+	}
 	return c.socketPath
 }
 
@@ -69,7 +92,7 @@ func (c *Client) IsConnected(ctx context.Context) (bool, error) {
 	}
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Debug().Err(err).Msg("Daemon connection check failed (daemon may not be running)")
@@ -106,7 +129,7 @@ func (c *Client) GetMetrics(ctx context.Context) (*clickhouse.SystemMetrics, err
 	}
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to fetch metrics")
@@ -144,7 +167,7 @@ func (c *Client) GetTables(ctx context.Context) ([]clickhouse.TableMetric, error
 	}
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to fetch tables")
@@ -182,7 +205,7 @@ func (c *Client) GetQueries(ctx context.Context) ([]clickhouse.QueryMetric, erro
 	}
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to fetch queries")
@@ -224,7 +247,7 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*clickhouse.Qu
 	req.Header.Set("Content-Type", "application/json")
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to execute query")
@@ -272,7 +295,7 @@ func (c *Client) TruncateTable(ctx context.Context, database, table string) erro
 	req.Header.Set("Content-Type", "application/json")
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to truncate table")
@@ -319,7 +342,7 @@ func (c *Client) ModifyTTL(ctx context.Context, database, table, ttl string) err
 	req.Header.Set("Content-Type", "application/json")
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to modify TTL")
@@ -360,7 +383,7 @@ func (c *Client) GetHistory(metric, period string) ([]rrd.Sample, error) {
 	}
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to fetch history")
@@ -460,7 +483,7 @@ func (c *Client) GetTruncatableTables(ctx context.Context) ([]clickhouse.Truncat
 	}
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to fetch truncatable tables")
@@ -498,7 +521,7 @@ func (c *Client) GetSystemStats(ctx context.Context) (*clickhouse.SystemStats, e
 	}
 	addVersionHeader(req)
 
-	client := &http.Client{Transport: c.unixTransport()}
+	client := &http.Client{Transport: c.getTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		clientLog.Error().Err(err).Msg("Failed to fetch system stats")

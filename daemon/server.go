@@ -72,7 +72,17 @@ func (s *Server) Start() error {
 func (s *Server) Stop() error {
 	serverLog.Info().Msg("Stopping daemon server")
 	close(s.stopCh)
-	return s.server.Close()
+	if s.server != nil {
+		return s.server.Close()
+	}
+	return nil
+}
+
+// StartPolling starts the background poll loop without the HTTP server.
+// Used in standalone mode where ServeHTTP is called directly via an
+// in-memory transport.
+func (s *Server) StartPolling() {
+	go s.pollLoop()
 }
 
 func (s *Server) pollLoop() {

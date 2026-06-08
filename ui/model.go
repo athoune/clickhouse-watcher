@@ -236,7 +236,14 @@ type Model struct {
 }
 
 func New(socketPath string) *Model {
-	uiLog.Debug().Str("socket", socketPath).Msg("Creating new UI model")
+	return NewWithClient(client.NewClient(socketPath))
+}
+
+// NewWithClient creates a UI model backed by an existing client instance.
+// This is used in standalone mode where the client connects to the daemon
+// via an in-memory transport instead of a Unix socket.
+func NewWithClient(c *client.Client) *Model {
+	uiLog.Debug().Str("socket", c.SocketPath()).Msg("Creating new UI model")
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -250,7 +257,7 @@ func New(socketPath string) *Model {
 
 	return &Model{
 		tab:              tabDashboard,
-		daemon:           client.NewClient(socketPath),
+		daemon:           c,
 		spinner:          sp,
 		loading:          true,
 		ttlInput:         ti,
