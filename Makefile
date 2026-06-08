@@ -1,8 +1,7 @@
 .PHONY: all build test clean install run-daemon run-client lint vet
 
 GIT_VERSION?=$(shell git describe --tags --always --abbrev=21 --dirty)
-BINARY_DAEMON=clickhouse-watcherd
-BINARY_CLIENT=clickhouse-watch
+BINARY=clickhouse-watch
 BUILD_DIR=build
 DIST_DIR=dist
 
@@ -24,17 +23,10 @@ all: test build
 .cache-go:
 	mkdir .cache-go
 
-build: build-daemon build-client
-
-build-daemon:
-	@echo "Building $(BINARY_DAEMON)..."
+build:
+	@echo "Building $(BINARY)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
-
-build-client:
-	@echo "Building $(BINARY_CLIENT)..."
-	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY) $(GOFLAGS) ./cmd/clickhouse-watch
 
 clean:
 	@echo "Cleaning..."
@@ -66,8 +58,9 @@ vet: vet
 install: build
 	@echo "Installing..."
 	@mkdir -p /usr/local/bin
-	@cp $(BUILD_DIR)/$(BINARY_DAEMON) /usr/local/bin/
-	@cp $(BUILD_DIR)/$(BINARY_CLIENT) /usr/local/bin/
+	@cp $(BUILD_DIR)/$(BINARY) /usr/local/bin/
+	@cd /usr/local/bin && ln -sf $(BINARY) $(BINARY)-serve
+	@cd /usr/local/bin && ln -sf $(BINARY) $(BINARY)-client
 
 install-systemd: install
 	@echo "Installing systemd files..."
@@ -90,9 +83,9 @@ $(PLATFORMS):
 	@echo "Building for $@..."
 	@mkdir -p $(DIST_DIR)/$@
 	GOOS=$(word 1,$(subst /, ,$@)) GOARCH=$(word 2,$(subst /, ,$@)) \
-		$(GOBUILD) -o $(DIST_DIR)/$@/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
-	GOOS=$(word 1,$(subst /, ,$@)) GOARCH=$(word 2,$(subst /, ,$@)) \
-		$(GOBUILD) -o $(DIST_DIR)/$@/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+		$(GOBUILD) -o $(DIST_DIR)/$@/$(BINARY) $(GOFLAGS) ./cmd/clickhouse-watch
+	@cd $(DIST_DIR)/$@ && ln -sf $(BINARY) $(BINARY)-serve
+	@cd $(DIST_DIR)/$@ && ln -sf $(BINARY) $(BINARY)-client
 
 dist: build-all
 	@echo "Creating distribution archives..."
@@ -101,7 +94,7 @@ dist: build-all
 		os=$$(echo $$platform | cut -d'/' -f1); \
 		arch=$$(echo $$platform | cut -d'/' -f2); \
 		tar -czf $(DIST_DIR)/archives/clickhouse-watcher-$(GIT_VERSION)-$${os}-$${arch}.tar.gz \
-			-C $(DIST_DIR)/$$platform $(BINARY_DAEMON) $(BINARY_CLIENT); \
+			-C $(DIST_DIR)/$$platform $(BINARY) $(BINARY)-serve $(BINARY)-client; \
 		echo "Created: $(DIST_DIR)/archives/clickhouse-watcher-$(GIT_VERSION)-$${os}-$${arch}.tar.gz"; \
 	done
 
@@ -137,8 +130,9 @@ deb-amd64: build-linux-amd64
 	@mkdir -p $(DIST_DIR)/deb/amd64/etc/systemd/system
 	@mkdir -p $(DIST_DIR)/deb/amd64/etc/tmpfiles.d
 	@mkdir -p $(DIST_DIR)/deb/amd64/var/lib/clickhouse-watcher
-	@cp $(DIST_DIR)/linux/amd64/$(BINARY_DAEMON) $(DIST_DIR)/deb/amd64/usr/local/bin/
-	@cp $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(DIST_DIR)/deb/amd64/usr/local/bin/
+	@cp $(DIST_DIR)/linux/amd64/$(BINARY) $(DIST_DIR)/deb/amd64/usr/local/bin/
+	@cd $(DIST_DIR)/deb/amd64/usr/local/bin && ln -sf $(BINARY) $(BINARY)-serve
+	@cd $(DIST_DIR)/deb/amd64/usr/local/bin && ln -sf $(BINARY) $(BINARY)-client
 	@cp systemd/clickhouse-watcherd.service $(DIST_DIR)/deb/amd64/etc/systemd/system/
 	@cp systemd/clickhouse-watcherd.conf $(DIST_DIR)/deb/amd64/etc/tmpfiles.d/
 	@cp config.yaml.example $(DIST_DIR)/deb/amd64/etc/clickhouse-watcher/config.yaml
@@ -181,8 +175,9 @@ deb-arm64: build-linux-arm64
 	@mkdir -p $(DIST_DIR)/deb/arm64/etc/systemd/system
 	@mkdir -p $(DIST_DIR)/deb/arm64/etc/tmpfiles.d
 	@mkdir -p $(DIST_DIR)/deb/arm64/var/lib/clickhouse-watcher
-	@cp $(DIST_DIR)/linux/arm64/$(BINARY_DAEMON) $(DIST_DIR)/deb/arm64/usr/local/bin/
-	@cp $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(DIST_DIR)/deb/arm64/usr/local/bin/
+	@cp $(DIST_DIR)/linux/arm64/$(BINARY) $(DIST_DIR)/deb/arm64/usr/local/bin/
+	@cd $(DIST_DIR)/deb/arm64/usr/local/bin && ln -sf $(BINARY) $(BINARY)-serve
+	@cd $(DIST_DIR)/deb/arm64/usr/local/bin && ln -sf $(BINARY) $(BINARY)-client
 	@cp systemd/clickhouse-watcherd.service $(DIST_DIR)/deb/arm64/etc/systemd/system/
 	@cp systemd/clickhouse-watcherd.conf $(DIST_DIR)/deb/arm64/etc/tmpfiles.d/
 	@cp config.yaml.example $(DIST_DIR)/deb/arm64/etc/clickhouse-watcher/config.yaml
@@ -220,22 +215,28 @@ deb-arm64: build-linux-arm64
 build-linux-amd64: .cache-go
 	@echo "Building for linux/amd64..."
 	@mkdir -p $(DIST_DIR)/linux/amd64
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/linux/amd64/$(BINARY) $(GOFLAGS) ./cmd/clickhouse-watch
+	@cd $(DIST_DIR)/linux/amd64 && ln -sf $(BINARY) $(BINARY)-serve
+	@cd $(DIST_DIR)/linux/amd64 && ln -sf $(BINARY) $(BINARY)-client
 
 build-linux-arm64: .cache-go
 	@echo "Building for linux/arm64..."
 	@mkdir -p $(DIST_DIR)/linux/arm64
-	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_DAEMON) $(GOFLAGS) ./cmd/daemon
-	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY_CLIENT) $(GOFLAGS) ./cmd/client
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/linux/arm64/$(BINARY) $(GOFLAGS) ./cmd/clickhouse-watch
+	@cd $(DIST_DIR)/linux/arm64 && ln -sf $(BINARY) $(BINARY)-serve
+	@cd $(DIST_DIR)/linux/arm64 && ln -sf $(BINARY) $(BINARY)-client
 
-run-daemon: build-daemon
+run-daemon: build
 	@echo "Starting daemon..."
-	@$(BUILD_DIR)/$(BINARY_DAEMON)
+	@$(BUILD_DIR)/$(BINARY) serve
 
-run-client: build-client
+run-client: build
 	@echo "Starting client..."
-	@$(BUILD_DIR)/$(BINARY_CLIENT)
+	@$(BUILD_DIR)/$(BINARY) client
+
+run-standalone: build
+	@echo "Starting standalone mode..."
+	@$(BUILD_DIR)/$(BINARY)
 
 # Docker commands
 docker-up:

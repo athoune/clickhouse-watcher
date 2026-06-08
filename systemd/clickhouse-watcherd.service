@@ -13,7 +13,7 @@ RuntimeDirectory=clickhouse-watcher
 RuntimeDirectoryMode=0755
 
 # Paths
-ExecStart=/usr/local/bin/clickhouse-watcherd -config /etc/clickhouse-watcher/config.yaml -socket /run/clickhouse-watcher/clickhouse-watcher.sock -data /var/lib/clickhouse-watcher
+ExecStart=/usr/local/bin/clickhouse-watch serve -config /etc/clickhouse-watcher/config.yaml -socket /run/clickhouse-watcher/clickhouse-watcher.sock -data /var/lib/clickhouse-watcher
 WorkingDirectory=/var/lib/clickhouse-watcher
 
 # Security hardening
